@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Simple Notion Import</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .card { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .btn { background: #3b82f6; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin: 5px; }
+        .btn:hover { background: #2563eb; }
+        .btn-success { background: #10b981; }
+        .btn-success:hover { background: #059669; }
+        .status { padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .status.info { background: #dbeafe; color: #1e40af; }
+        .status.success { background: #d1fae5; color: #065f46; }
+        .status.error { background: #fee2e2; color: #991b1b; }
+        .teacher-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 15px; }
+        .teacher-card { background: #f3f4f6; padding: 10px; border-radius: 5px; text-align: center; }
+        .day-tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
+        .day-tab { padding: 10px 20px; background: #e5e7eb; border-radius: 5px; cursor: pointer; }
+        .day-tab.active { background: #3b82f6; color: white; }
+        select { padding: 8px; margin: 5px; border: 1px solid #d1d5db; border-radius: 4px; }
+        h2 { color: #1f2937; margin-bottom: 15px; }
+        .import-section { margin-top: 20px; padding: 20px; background: #f9fafb; border-radius: 8px; }
+        .time-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 10px; }
+        .time-slot { background: white; padding: 8px; border: 1px solid #e5e7eb; border-radius: 4px; text-align: center; cursor: pointer; }
+        .time-slot.selected { background: #3b82f6; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>📚 Simple Notion Import for Weekly Scheduler</h1>
+            <p>Import teachers from Notion and set their availability per day</p>
+        </div>
+
+        <div class="card">
+            <h2>Step 1: Check Available Teachers in Notion</h2>
+            <button class="btn" onclick="loadNotionTeachers()">Load Teachers from Notion</button>
+            <div id="notion-status"></div>
+            <div id="notion-teachers"></div>
+        </div>
+
+        <div class="card">
+            <h2>Step 2: Import Teachers</h2>
+            
+            <!-- Bulk Import Option -->
+            <div class="import-section" style="background: #f0f9ff; border: 2px solid #0ea5e9;">
+                <h3>🚀 Quick Import: All Teachers to All Days</h3>
+                <p>Import all teachers to every day of the week at once. You can set individual availability later.</p>
+                <button class="btn btn-success" onclick="importAllTeachersAllDays()" style="font-size: 16px; padding: 15px 30px;">
+                    Import All Teachers to All Days
+                </button>
+                <div id="bulk-import-status"></div>
+                <div id="bulk-import-results"></div>
+            </div>
+
+            <!-- Individual Day Import -->
+            <div style="margin-top: 30px;">
+                <h3>Or Import by Individual Day</h3>
+                <p>Select a specific day and import all teachers to that day only.</p>
+                
+                <div class="day-tabs" id="day-tabs">
+                    <div class="day-tab" onclick="selectDay(1, 'Monday')">Monday</div>
+                    <div class="day-tab" onclick="selectDay(2, 'Tuesday')">Tuesday</div>
+                    <div class="day-tab" onclick="selectDay(3, 'Wednesday')">Wednesday</div>
+                    <div class="day-tab" onclick="selectDay(4, 'Thursday')">Thursday</div>
+                    <div class="day-tab" onclick="selectDay(5, 'Friday')">Friday</div>
+                    <div class="day-tab" onclick="selectDay(6, 'Saturday')">Saturday</div>
+                    <div class="day-tab" onclick="selectDay(0, 'Sunday')">Sunday</div>
+                </div>
+
+                <div id="import-section" class="import-section" style="display: none;">
+                    <h3 id="selected-day-title">Import for Monday</h3>
+                    <button class="btn btn-success" onclick="importAllTeachers()">Import All Teachers to This Day</button>
+                    <div id="import-status"></div>
+                    <div id="import-results"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Step 3: Set Teacher Availability</h2>
+            <p>After importing, you can set each teacher's available time slots</p>
+            
+            <select id="teacher-select" onchange="loadTeacherAvailability()">
+                <option value="">Select a teacher to set availability</option>
+            </select>
+            
+            <div id="availability-section" style="display: none;">
+                <h4>Select available time slots:</h4>
+                <div class="time-grid" id="time-slots">
+                    <!-- Time slots will be populated here -->
+                </div>
+                <button class="btn btn-success" onclick="saveAvailability()">Save Availability</button>
+                <div id="availability-status"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Current Teachers in Weekly Schedule</h2>
+            <button class="btn" onclick="loadCurrentTeachers()">Refresh</button>
+            <div id="current-teachers"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:5555/api';
+        let selectedDay = null;
+        let selectedDayName = '';
+        let currentTemplateId = 1;
+        let selectedTeacherId = null;
+        let selectedSlots = new Set();
+
+        const timeSlots = [
+            { id: 1, name: '8:00-8:30 AM' },
+            { id: 2, name: '8:30-9:00 AM' },
+            { id: 3, name: '9:00-9:30 AM' },
+            { id: 4, name: '9:30-10:00 AM' },
+            { id: 5, name: '10:00-10:30 AM' },
+            { id: 6, name: '10:30-11:00 AM' },
+            { id: 7, name: '11:00-11:30 AM' },
+            { id: 8, name: '11:30-12:00 PM' },
+            { id: 9, name: '1:00-1:30 PM' },
+            { id: 10, name: '1:30-2:00 PM' },
+            { id: 11, name: '2:00-2:30 PM' },
+            { id: 12, name: '2:30-3:00 PM' },
+            { id: 13, name: '3:00-3:30 PM' },
+            { id: 14, name: '3:30-4:00 PM' },
+            { id: 15, name: '4:00-4:30 PM' },
+            { id: 16, name: '4:30-5:00 PM' },
+            { id: 17, name: '5:00-5:30 PM' },
+            { id: 18, name: '5:30-6:00 PM' },
+            { id: 19, name: '6:00-6:30 PM' },
+            { id: 20, name: '6:30-7:00 PM' },
+            { id: 21, name: '7:00-7:30 PM' },
+            { id: 22, name: '7:30-8:00 PM' },
+            { id: 23, name: '8:00-8:30 PM' },
+            { id: 24, name: '8:30-9:00 PM' }
+        ];
+
+        async function loadNotionTeachers() {
+            const status = document.getElementById('notion-status');
+            const teachersDiv = document.getElementById('notion-teachers');
+            
+            status.innerHTML = '<div class="status info">Loading teachers from Notion...</div>';
+            teachersDiv.innerHTML = '';
+            
+            try {
+                const response = await fetch(`${API_BASE}/notion/teachers-simple`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                // Debug: Log the response to see what we're getting
+                console.log('API Response:', data);
+                
+                if (data.success && data.teachers && Array.isArray(data.teachers)) {
+                    status.innerHTML = `<div class="status success">Found ${data.total} teachers in Notion</div>`;
+                    
+                    if (data.teachers.length > 0) {
+                        teachersDiv.innerHTML = '<div class="teacher-list">' +
+                            data.teachers.map(t => `<div class="teacher-card">${t.name}</div>`).join('') +
+                            '</div>';
+                    } else {
+                        teachersDiv.innerHTML = '<div class="status info">No teachers found in Notion database.</div>';
+                    }
+                } else if (data.error) {
+                    throw new Error(data.error);
+                } else {
+                    throw new Error('Invalid response format from API');
+                }
+            } catch (error) {
+                console.error('Error loading teachers:', error);
+                status.innerHTML = `<div class="status error">Failed to load teachers: ${error.message}</div>`;
+                teachersDiv.innerHTML = `<div class="status error">
+                    <strong>Troubleshooting:</strong><br>
+                    • Check that backend is running on port 5555<br>
+                    • Try: <a href="http://localhost:5555/api/health" target="_blank">http://localhost:5555/api/health</a><br>
+                    • Check browser console for details
+                </div>`;
+            }
+        }
+
+        function selectDay(day, dayName) {
+            selectedDay = day;
+            selectedDayName = dayName;
+            
+            // Update UI
+            document.querySelectorAll('.day-tab').forEach(tab => tab.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            document.getElementById('import-section').style.display = 'block';
+            document.getElementById('selected-day-title').textContent = `Import for ${dayName}`;
+            
+            // Load current teachers for this day
+            loadCurrentTeachers();
+        }
+
+        async function importAllTeachersAllDays() {
+            if (!confirm('This will import all teachers to all 7 days of the week. Continue?')) {
+                return;
+            }
+            
+            const status = document.getElementById('bulk-import-status');
+            const results = document.getElementById('bulk-import-results');
+            status.innerHTML = '<div class="status info">Starting bulk import...</div>';
+            results.innerHTML = '';
+            
+            try {
+                // Get or create template
+                const templatesResponse = await fetch(`${API_BASE}/weekly/templates`);
+                let templates = await templatesResponse.json();
+                
+                if (!templates || templates.length === 0) {
+                    const createResponse = await fetch(`${API_BASE}/weekly/templates`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: 'Weekly Schedule',
+                            description: 'Imported from Notion'
+                        })
+                    });
+                    const newTemplate = await createResponse.json();
+                    currentTemplateId = newTemplate.id;
+                } else {
+                    currentTemplateId = templates[0].id;
+                }
+                
+                const days = [
+                    { id: 0, name: 'Sunday' },
+                    { id: 1, name: 'Monday' },
+                    { id: 2, name: 'Tuesday' },
+                    { id: 3, name: 'Wednesday' },
+                    { id: 4, name: 'Thursday' },
+                    { id: 5, name: 'Friday' },
+                    { id: 6, name: 'Saturday' }
+                ];
+                
+                let totalImported = 0;
+                let totalSkipped = 0;
+                let dayResults = [];
+                
+                // Import for each day
+                for (const day of days) {
+                    status.innerHTML = `<div class="status info">Importing teachers for ${day.name}...</div>`;
+                    
+                    try {
+                        const response = await fetch(`${API_BASE}/notion/import-teachers-simple`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                templateId: currentTemplateId,
+                                dayOfWeek: day.id
+                            })
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.success) {
+                            totalImported += data.summary.imported;
+                            totalSkipped += data.summary.skipped;
+                            dayResults.push({
+                                day: day.name,
+                                imported: data.summary.imported,
+                                skipped: data.summary.skipped,
+                                success: true
+                            });
+                        } else {
+                            dayResults.push({
+                                day: day.name,
+                                error: data.error,
+                                success: false
+                            });
+                        }
+                    } catch (error) {
+                        dayResults.push({
+                            day: day.name,
+                            error: error.message,
+                            success: false
+                        });
+                    }
+                    
+                    // Small delay to avoid overwhelming the server
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                }
+                
+                // Show final results
+                status.innerHTML = `<div class="status success">✅ Bulk import complete! Total imported: ${totalImported}, Total skipped: ${totalSkipped}</div>`;
+                
+                let html = '<h4>📊 Import Summary by Day:</h4>';
+                html += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">';
+                
+                dayResults.forEach(result => {
+                    if (result.success) {
+                        html += `
+                            <div style="background: #f0fdf4; border: 1px solid #22c55e; padding: 10px; border-radius: 5px;">
+                                <strong>${result.day}</strong><br>
+                                <small>Imported: ${result.imported}<br>Skipped: ${result.skipped}</small>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div style="background: #fef2f2; border: 1px solid #ef4444; padding: 10px; border-radius: 5px;">
+                                <strong>${result.day}</strong><br>
+                                <small style="color: #dc2626;">Error: ${result.error}</small>
+                            </div>
+                        `;
+                    }
+                });
+                
+                html += '</div>';
+                html += '<p style="margin-top: 15px;"><strong>Next step:</strong> Use Step 3 below to set availability for each teacher on each day.</p>';
+                
+                results.innerHTML = html;
+                
+            } catch (error) {
+                status.innerHTML = `<div class="status error">Bulk import failed: ${error.message}</div>`;
+            }
+        }
+
+        async function importAllTeachers() {
+            if (selectedDay === null) {
+                alert('Please select a day first');
+                return;
+            }
+            
+            const status = document.getElementById('import-status');
+            status.innerHTML = '<div class="status info">Importing teachers...</div>';
+            
+            try {
+                // Get the template ID
+                const templatesResponse = await fetch(`${API_BASE}/weekly/templates`);
+                const templates = await templatesResponse.json();
+                
+                if (!templates || templates.length === 0) {
+                    // Create a template if none exists
+                    const createResponse = await fetch(`${API_BASE}/weekly/templates`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: 'Weekly Schedule',
+                            description: 'Imported from Notion'
+                        })
+                    });
+                    const newTemplate = await createResponse.json();
+                    currentTemplateId = newTemplate.id;
+                } else {
+                    currentTemplateId = templates[0].id;
+                }
+                
+                // Import teachers
+                const response = await fetch(`${API_BASE}/notion/import-teachers-simple`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        templateId: currentTemplateId,
+                        dayOfWeek: selectedDay
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    status.innerHTML = `<div class="status success">Import complete! Imported: ${data.summary.imported}, Skipped: ${data.summary.skipped}</div>`;
+                    
+                    const resultsDiv = document.getElementById('import-results');
+                    let html = '';
+                    
+                    if (data.imported.length > 0) {
+                        html += '<h4>✅ Imported:</h4>';
+                        html += '<div class="teacher-list">' + 
+                            data.imported.map(name => `<div class="teacher-card">${name}</div>`).join('') +
+                            '</div>';
+                    }
+                    
+                    if (data.skipped.length > 0) {
+                        html += '<h4>⏭️ Already exists (skipped):</h4>';
+                        html += '<div class="teacher-list">' + 
+                            data.skipped.map(name => `<div class="teacher-card">${name}</div>`).join('') +
+                            '</div>';
+                    }
+                    
+                    resultsDiv.innerHTML = html;
+                    
+                    // Refresh the current teachers list
+                    loadCurrentTeachers();
+                } else {
+                    throw new Error(data.error || 'Import failed');
+                }
+            } catch (error) {
+                status.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+            }
+        }
+
+        async function loadCurrentTeachers() {
+            if (selectedDay === null) return;
+            
+            try {
+                const response = await fetch(`${API_BASE}/weekly/templates/${currentTemplateId}/teachers/${selectedDay}`);
+                const teachers = await response.json();
+                
+                const currentDiv = document.getElementById('current-teachers');
+                if (teachers.length > 0) {
+                    currentDiv.innerHTML = `<h4>Teachers for ${selectedDayName}:</h4>` +
+                        '<div class="teacher-list">' +
+                        teachers.map(t => `
+                            <div class="teacher-card">
+                                ${t.name}<br>
+                                <small>${t.availability.length > 0 ? `${t.availability.length} slots` : 'No availability set'}</small>
+                            </div>
+                        `).join('') +
+                        '</div>';
+                    
+                    // Update teacher select
+                    const select = document.getElementById('teacher-select');
+                    select.innerHTML = '<option value="">Select a teacher to set availability</option>' +
+                        teachers.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+                } else {
+                    currentDiv.innerHTML = `<div class="status info">No teachers for ${selectedDayName} yet. Import them from Notion above.</div>`;
+                }
+            } catch (error) {
+                console.error('Error loading teachers:', error);
+            }
+        }
+
+        function loadTeacherAvailability() {
+            const teacherId = document.getElementById('teacher-select').value;
+            if (!teacherId) {
+                document.getElementById('availability-section').style.display = 'none';
+                return;
+            }
+            
+            selectedTeacherId = teacherId;
+            selectedSlots.clear();
+            document.getElementById('availability-section').style.display = 'block';
+            
+            // Generate time slots grid
+            const slotsDiv = document.getElementById('time-slots');
+            slotsDiv.innerHTML = timeSlots.map(slot => `
+                <div class="time-slot" id="slot-${slot.id}" onclick="toggleSlot(${slot.id})">
+                    ${slot.name}
+                </div>
+            `).join('');
+        }
+
+        function toggleSlot(slotId) {
+            const slotElement = document.getElementById(`slot-${slotId}`);
+            if (selectedSlots.has(slotId)) {
+                selectedSlots.delete(slotId);
+                slotElement.classList.remove('selected');
+            } else {
+                selectedSlots.add(slotId);
+                slotElement.classList.add('selected');
+            }
+        }
+
+        async function saveAvailability() {
+            if (!selectedTeacherId || selectedSlots.size === 0) {
+                document.getElementById('availability-status').innerHTML = 
+                    '<div class="status error">Please select at least one time slot</div>';
+                return;
+            }
+            
+            const status = document.getElementById('availability-status');
+            status.innerHTML = '<div class="status info">Saving availability...</div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/weekly/templates/${currentTemplateId}/teachers/${selectedTeacherId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        availability: Array.from(selectedSlots).sort((a, b) => a - b)
+                    })
+                });
+                
+                if (response.ok) {
+                    status.innerHTML = '<div class="status success">Availability saved successfully!</div>';
+                    loadCurrentTeachers();
+                } else {
+                    throw new Error('Failed to save availability');
+                }
+            } catch (error) {
+                status.innerHTML = `<div class="status error">Error: ${error.message}</div>`;
+            }
+        }
+
+        // Load templates and teachers on page load
+        window.onload = async function() {
+            loadNotionTeachers();
+            
+            // Get template ID
+            try {
+                const response = await fetch(`${API_BASE}/weekly/templates`);
+                const templates = await response.json();
+                if (templates && templates.length > 0) {
+                    currentTemplateId = templates[0].id;
+                }
+            } catch (error) {
+                console.error('Error loading templates:', error);
+            }
+        };
+    </script>
+</body>
+</html>

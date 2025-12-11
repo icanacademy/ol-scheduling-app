@@ -1,0 +1,521 @@
+import { useState, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getTeachers, getTimeSlots, deleteTeacher, updateTeacher, deleteAllTeachers, previewTeachersFromNotion, importTeachersFromNotion, createTeacher, getAssignments, getAssignmentsByDateRange } from '../services/api';
+import { dayToDate, weekDays } from '../utils/dayMapping';
+import TeacherFormModal from './TeacherFormModal';
+import NotionImportModal from './NotionImportModal';
+
+function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
+  const queryClient = useQueryClient();
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingTeacher, setEditingTeacher] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Fetch teachers for the selected date
+  const { data: teachers, isLoading: teachersLoading } = useQuery({
+    queryKey: ['teachers', selectedDate],
+    queryFn: async () => {
+      const response = await getTeachers(selectedDate);
+      return response.data;
+    },
+    enabled: !!selectedDate,
+  });
+
+  // Fetch time slots for display
+  const { data: timeSlots } = useQuery({
+    queryKey: ['timeSlots'],
+    queryFn: async () => {
+      const response = await getTimeSlots();
+      return response.data;
+    },
+  });
+
+  // Fetch assignments to show which teachers actually have classes
+  const { data: assignments } = useQuery({
+    queryKey: ['assignments', selectedDay],
+    queryFn: async () => {
+      if (isAllWeekMode) {
+        // Fetch entire week
+        const response = await getAssignmentsByDateRange('2024-01-01', 7);
+        return response.data;
+      } else {
+        // Fetch single day
+        const response = await getAssignments(selectedDate);
+        return response.data;
+      }
+    },
+    enabled: !!selectedDate,
+  });
+
+  // Update availability mutation
+  const updateAvailabilityMutation = useMutation({
+    mutationFn: ({ id, data }) => updateTeacher(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries(['teachers']);
+    },
+    onError: (error) => {
+      console.error('Update error:', error);
+      alert('Failed to update teacher availability');
+    },
+  });
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: deleteTeacher,
+    onSuccess: () => {
+      queryClient.invalidateQueries(['teachers']);
+    },
+  });
+
+
+  // Delete all mutation
+  const deleteAllMutation = useMutation({
+    mutationFn: (date) => deleteAllTeachers(date),
+    onSuccess: (response) => {
+      queryClient.invalidateQueries(['teachers']);
+      alert(response.data.message || 'Teachers deleted successfully!');
+    },
+    onError: (error) => {
+      console.error('Delete all error:', error);
+      alert('Failed to delete all teachers: ' + (error.response?.data?.message || error.message));
+    },
+  });
+
+  const handleAdd = () => {
+    setEditingTeacher(null);
+    setIsModalOpen(true);
+  };
+
+  const handleEdit = (teacher) => {
+    setEditingTeacher(teacher);
+    setIsModalOpen(true);
+  };
+
+  const handleDelete = async (teacher) => {
+    if (confirm(`Are you sure you want to delete ${teacher.name}?`)) {
+      try {
+        await deleteMutation.mutateAsync(teacher.id);
+      } catch (error) {
+        alert('Failed to delete teacher');
+      }
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    const teacherCount = teachers?.length || 0;
+
+    if (teacherCount === 0) {
+      alert('No teachers to delete');
+      return;
+    }
+
+    const confirmed = confirm(
+      `⚠️ WARNING: Delete ALL ${teacherCount} teacher(s) for ${selectedDate}?\n\nThis will remove all teachers for this date only.\n\nA backup will be created automatically before deletion.`
+    );
+
+    if (confirmed) {
+      try {
+        await deleteAllMutation.mutateAsync(selectedDate);
+      } catch (error) {
+        console.error('Failed to delete all teachers:', error);
+      }
+    }
+  };
+
+  const handleModalClose = () => {
+    setIsModalOpen(false);
+    setEditingTeacher(null);
+  };
+
+  const handleSave = () => {
+    queryClient.invalidateQueries(['teachers']);
+    handleModalClose();
+  };
+
+  // Notion import handlers
+  const handlePreviewFromNotion = async (date) => {
+    const response = await previewTeachersFromNotion(date);
+    // Handle both formats: array directly or object with teachers array
+    if (Array.isArray(response.data)) {
+      return response.data;
+    } else if (response.data && response.data.teachers) {
+      return response.data.teachers;
+    } else {
+      console.error('Unexpected response format:', response.data);
+      return [];
+    }
+  };
+
+  const handleImportFromNotion = async (teachers) => {
+    // Import each teacher for all days since teachers are available all week
+    const weekDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    
+    for (const teacher of teachers) {
+      // Import the teacher for all 7 days, but check for duplicates first
+      for (const day of weekDays) {
+        const targetDate = dayToDate(day);
+        if (targetDate) {
+          try {
+            // Check if teacher already exists for this date
+            const existingTeachers = await getTeachers(targetDate);
+            const teacherExists = existingTeachers.data.some(existing => 
+              existing.name.toLowerCase() === teacher.name.toLowerCase()
+            );
+            
+            if (!teacherExists) {
+              await createTeacher({
+                ...teacher,
+                date: targetDate
+              });
+            } else {
+              console.log(`Teacher ${teacher.name} already exists for ${day}, skipping...`);
+            }
+          } catch (error) {
+            console.error(`Failed to import ${teacher.name} for ${day}:`, error);
+          }
+        }
+      }
+    }
+  };
+
+  // Toggle availability for a specific time slot
+  const handleToggleAvailability = async (teacher, timeSlotId) => {
+    if (isAllWeekMode) {
+      // When in All Week mode, just update the current (Monday) record
+      // This is a simplified approach to avoid server overload
+      const currentAvailability = teacher.availability || [];
+      const newAvailability = currentAvailability.includes(timeSlotId)
+        ? currentAvailability.filter(id => id !== timeSlotId)
+        : [...currentAvailability, timeSlotId].sort();
+
+      try {
+        await updateAvailabilityMutation.mutateAsync({
+          id: teacher.id,
+          data: {
+            name: teacher.name,
+            availability: newAvailability,
+            color_keyword: teacher.color_keyword,
+          },
+        });
+        
+        // Show a message explaining the limitation
+        console.log('Updated availability in All Week view. Note: This updates the reference record only.');
+        
+      } catch (error) {
+        console.error('Failed to toggle availability:', error);
+        alert('Failed to update teacher availability');
+      }
+    } else {
+      // Single day mode - original logic
+      const currentAvailability = teacher.availability || [];
+      const newAvailability = currentAvailability.includes(timeSlotId)
+        ? currentAvailability.filter(id => id !== timeSlotId)
+        : [...currentAvailability, timeSlotId].sort();
+
+      try {
+        await updateAvailabilityMutation.mutateAsync({
+          id: teacher.id,
+          data: {
+            name: teacher.name,
+            availability: newAvailability,
+            color_keyword: teacher.color_keyword,
+          },
+        });
+      } catch (error) {
+        console.error('Failed to toggle availability:', error);
+      }
+    }
+  };
+
+  // Filter teachers by search term with deduplication
+  const filteredTeachers = useMemo(() => {
+    if (!teachers) return [];
+    
+    // Create a map to deduplicate teachers by name
+    const uniqueTeachers = new Map();
+    teachers.forEach(teacher => {
+      if (!uniqueTeachers.has(teacher.name)) {
+        uniqueTeachers.set(teacher.name, teacher);
+      }
+    });
+    
+    // Filter by search term
+    return Array.from(uniqueTeachers.values()).filter((teacher) =>
+      teacher.name.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  }, [teachers, searchTerm]);
+
+  // Helper to get time slot names
+  const getTimeSlotNames = (availability) => {
+    if (!availability || !timeSlots) return '';
+    return availability
+      .map((id) => timeSlots.find((ts) => ts.id === id)?.name)
+      .filter(Boolean)
+      .join(', ');
+  };
+
+  // Helper to check if teacher has a class at specific time slot
+  const getTeacherClassInfo = (teacherName, timeSlotId) => {
+    if (!assignments || !assignments.length) return { hasClass: false, students: [] };
+    
+    // Find assignments for this teacher and time slot
+    const teacherAssignments = assignments.filter(assignment => 
+      assignment.time_slot_id === timeSlotId &&
+      assignment.teachers?.some(teacher => teacher.name === teacherName)
+    );
+    
+    if (teacherAssignments.length === 0) {
+      return { hasClass: false, students: [] };
+    }
+    
+    // Collect all students from assignments
+    const students = teacherAssignments.reduce((acc, assignment) => {
+      if (assignment.students) {
+        acc.push(...assignment.students.map(s => s.name));
+      }
+      return acc;
+    }, []);
+    
+    // Remove duplicates and get unique student names
+    const uniqueStudents = [...new Set(students)];
+    
+    return {
+      hasClass: true,
+      students: uniqueStudents,
+      assignmentCount: teacherAssignments.length
+    };
+  };
+
+  if (teachersLoading) {
+    return <div className="text-center py-8">Loading teachers...</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-xl shadow-lg p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-2xl font-bold text-gray-900">Teachers Management</h2>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold shadow-md hover:shadow-lg transition-all"
+            >
+              Import from Notion
+            </button>
+            <button
+              onClick={handleDeleteAll}
+              disabled={deleteAllMutation.isPending || !teachers || teachers.length === 0}
+              className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold shadow-md hover:shadow-lg transition-all"
+            >
+              Delete All Teachers
+            </button>
+            <button
+              onClick={handleAdd}
+              className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold shadow-md hover:shadow-lg transition-all"
+            >
+              + Add Teacher
+            </button>
+          </div>
+        </div>
+
+        {/* All Week Mode Notice */}
+        {isAllWeekMode && (
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <div className="flex items-center mb-2">
+              <span className="text-blue-600 text-lg mr-2">ℹ️</span>
+              <h3 className="text-lg font-semibold text-blue-800">All Week Mode</h3>
+            </div>
+            <p className="text-sm text-blue-700">
+              You are viewing teachers in All Week mode. Changes to availability will update the reference record.
+            </p>
+          </div>
+        )}
+
+        {/* Legend */}
+        <div className="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <h3 className="text-lg font-semibold text-gray-800 mb-3">Legend</h3>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-red-600 rounded flex items-center justify-center">
+                <span className="text-white text-xs font-bold">#</span>
+              </div>
+              <span><strong>Has Class</strong> - Teacher has assigned students (Red)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-green-600 rounded flex items-center justify-center">
+                <span className="text-white text-xs font-bold">✓</span>
+              </div>
+              <span><strong>Available</strong> - Teacher is available but no class (Green)</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-gray-200 rounded"></div>
+              <span><strong>Unavailable</strong> - Teacher is not available (Gray)</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="mb-4">
+          <input
+            type="text"
+            placeholder="Search teachers..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full px-5 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-base"
+          />
+        </div>
+
+        {/* Teachers Grid */}
+        <div className="overflow-x-auto max-h-[calc(100vh-400px)] overflow-y-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gray-200">
+                <th className="border border-gray-300 px-4 py-3 text-left text-sm font-semibold text-gray-900 sticky left-0 top-0 bg-gray-200 z-20">
+                  Teacher Name
+                </th>
+                {timeSlots?.map((slot, index) => {
+                  // Determine background color based on position
+                  const bgColor = Math.floor(index / 2) % 2 === 0 ? 'bg-gray-200' : 'bg-gray-300';
+
+                  return (
+                    <th key={slot.id} className={`border border-gray-300 px-2 py-3 text-center text-xs font-semibold text-gray-900 min-w-[80px] sticky top-0 z-10 ${bgColor}`}>
+                      {slot.name.replace(' to ', '-')}
+                    </th>
+                  );
+                })}
+                <th className="border border-gray-300 px-4 py-3 text-center text-sm font-semibold text-gray-900 sticky right-0 top-0 bg-gray-200 z-20">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredTeachers.length === 0 ? (
+                <tr>
+                  <td colSpan={timeSlots?.length + 2 || 3} className="px-4 py-8 text-center text-gray-500">
+                    No teachers found
+                  </td>
+                </tr>
+              ) : (
+                filteredTeachers.map((teacher) => {
+                  // Get color for this teacher
+                  const getTeacherColor = () => {
+                    if (!teacher.color_keyword) return '#10b981'; // default green
+                    const colorMap = {
+                      red: '#ef4444',
+                      blue: '#3b82f6',
+                      green: '#10b981',
+                      yellow: '#eab308',
+                      purple: '#a855f7',
+                      orange: '#f97316',
+                      pink: '#ec4899',
+                    };
+                    return colorMap[teacher.color_keyword] || '#10b981';
+                  };
+
+                  return (
+                    <tr key={teacher.id} className="hover:bg-gray-50">
+                      <td
+                        className="border border-gray-300 px-4 py-3 text-sm font-medium text-gray-900 sticky left-0 bg-white hover:bg-blue-100 z-10 cursor-pointer"
+                        onClick={() => handleEdit(teacher)}
+                        title="Click to edit teacher"
+                      >
+                        {teacher.name}
+                      </td>
+                      {timeSlots?.map((slot, index) => {
+                        const isAvailable = teacher.availability?.includes(slot.id);
+                        const classInfo = getTeacherClassInfo(teacher.name, slot.id);
+
+                        // Determine background color based on position
+                        const bgColor = Math.floor(index / 2) % 2 === 0 ? '#eff6ff' : '#f3f4f6'; // blue-50 or gray-50
+                        
+                        // Determine cell styling based on availability and class assignment
+                        let cellStyle = { backgroundColor: bgColor };
+                        let cellContent = null;
+                        let titleText = 'Not available - Click to add';
+                        
+                        if (classInfo.hasClass) {
+                          // Teacher has a class - show with bright red background
+                          cellStyle = {
+                            backgroundColor: '#dc2626', // bright red for classes
+                            color: 'white'
+                          };
+                          cellContent = (
+                            <div className="text-white text-xs font-bold">
+                              <div>{classInfo.students.length}</div>
+                            </div>
+                          );
+                          titleText = `HAS CLASS: ${classInfo.students.join(', ')} (${classInfo.students.length} student${classInfo.students.length !== 1 ? 's' : ''})`;
+                        } else if (isAvailable) {
+                          // Teacher is available but no class assigned - show with green background
+                          cellStyle = {
+                            backgroundColor: '#16a34a', // bright green for available
+                            color: 'white'
+                          };
+                          cellContent = (
+                            <div className="text-white text-xs font-bold">Available</div>
+                          );
+                          titleText = 'Available - Click to remove';
+                        }
+
+                        return (
+                          <td
+                            key={slot.id}
+                            className="px-2 py-1 text-center border border-gray-300 cursor-pointer"
+                            style={cellStyle}
+                            onClick={() => handleToggleAvailability(teacher, slot.id)}
+                            title={titleText}
+                          >
+                            {cellContent}
+                          </td>
+                        );
+                      })}
+                      <td className="border border-gray-300 px-4 py-3 text-center sticky right-0 bg-white hover:bg-gray-50 z-10">
+                        <button
+                          onClick={() => handleDelete(teacher)}
+                          disabled={deleteMutation.isPending}
+                          className="px-3 py-1 text-sm text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-4 text-sm text-gray-600">
+          Total: {filteredTeachers.length} teacher{filteredTeachers.length !== 1 ? 's' : ''}
+        </div>
+      </div>
+
+      {isModalOpen && (
+        <TeacherFormModal
+          isOpen={isModalOpen}
+          onClose={handleModalClose}
+          onSave={handleSave}
+          teacher={editingTeacher}
+          timeSlots={timeSlots || []}
+          selectedDate={selectedDate}
+        />
+      )}
+
+      {isImportModalOpen && (
+        <NotionImportModal
+          isOpen={isImportModalOpen}
+          onClose={() => setIsImportModalOpen(false)}
+          type="teachers"
+          selectedDate={selectedDate}
+          onPreview={handlePreviewFromNotion}
+          onImport={handleImportFromNotion}
+        />
+      )}
+
+    </div>
+  );
+}
+
+export default TeachersPage;
