@@ -331,6 +331,7 @@ export const previewStudentsFromNotion = async (req, res) => {
 
     const students = [];
     const errors = [];
+    let skippedCount = 0;
 
     // Get existing students for this date
     const existingStudents = await Student.getAll(date);
@@ -364,13 +365,18 @@ export const previewStudentsFromNotion = async (req, res) => {
           continue;
         }
 
+        // Skip students that already exist in the database for this date
         const exists = existingNames.has(name.toLowerCase());
+        if (exists) {
+          skippedCount++;
+          continue;
+        }
 
         students.push({
           name: name,
           grade: grade,
           preferredTime: preferredTime,
-          exists: exists
+          exists: false
         });
       } catch (error) {
         errors.push(error.message);
@@ -381,6 +387,7 @@ export const previewStudentsFromNotion = async (req, res) => {
       success: true,
       students: students,
       total: students.length,
+      skipped: skippedCount,
       errors: errors
     });
   } catch (error) {
