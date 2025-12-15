@@ -1,13 +1,4 @@
 import pool from '../db/connection.js';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs/promises';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const execAsync = promisify(exec);
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 class Backup {
   // Get all backups with metadata
@@ -27,7 +18,7 @@ class Backup {
     return result.rows[0];
   }
 
-  // Create a new backup
+  // Create a new backup (serverless-compatible - stores data as JSON in database)
   static async create(description = null) {
     // Use Philippine Time (UTC+8) for timestamp
     const now = new Date();
@@ -39,63 +30,51 @@ class Backup {
     const phtMinute = now.toLocaleString('en-GB', { ...phtOptions, minute: '2-digit' });
     const phtSecond = now.toLocaleString('en-GB', { ...phtOptions, second: '2-digit' });
     const timestamp = `${phtYear}-${phtMonth}-${phtDay}T${phtHour}-${phtMinute}-${phtSecond}`;
-    const filename = `backup_${timestamp}.sql`;
-    const backupDir = path.join(__dirname, '../../backups');
-    const backupPath = path.join(backupDir, filename);
+    const filename = `backup_${timestamp}.json`;
 
-    // Ensure backup directory exists
-    await fs.mkdir(backupDir, { recursive: true });
-
-    // Get current counts before backup
+    // Get current counts
     const counts = await this.getCurrentCounts();
 
-    // Execute pg_dump with plain SQL format
-    const dbHost = process.env.DB_HOST || 'localhost';
-    const dbPort = process.env.DB_PORT || '5432';
-    const dbUser = process.env.DB_USER || 'postgres';
-    const dbPassword = process.env.DB_PASSWORD || 'postgres';
-    const dbName = process.env.DB_NAME || 'ol_scheduling_db';
+    // Export all data as JSON using SQL queries
+    const backupData = await this.exportAllData();
+    const backupJson = JSON.stringify(backupData);
+    const fileSizeBytes = Buffer.byteLength(backupJson, 'utf8');
 
-    // Use Docker's pg_dump to avoid version mismatch
-    // Container name is 'scheduling_db' but it hosts multiple databases
-    const containerName = 'scheduling_db';
+    // Store metadata and backup data in database
+    const result = await pool.query(
+      `INSERT INTO backup_metadata
+       (filename, created_at, teachers_count, students_count, assignments_count, description, file_size_bytes, backup_data)
+       VALUES ($1, NOW() AT TIME ZONE 'Asia/Manila', $2, $3, $4, $5, $6, $7)
+       RETURNING id, filename, created_at, teachers_count, students_count, assignments_count, description, file_size_bytes`,
+      [filename, counts.teachers, counts.students, counts.assignments, description, fileSizeBytes, backupJson]
+    );
 
-    try {
-      // Use plain SQL format with --clean and --if-exists
-      // Run pg_dump inside the Docker container
-      await execAsync(`docker exec ${containerName} pg_dump -U ${dbUser} --clean --if-exists --exclude-table=backup_metadata ${dbName} > "${backupPath}"`);
+    return result.rows[0];
+  }
 
-      // Get file size
-      const stats = await fs.stat(backupPath);
-      const fileSizeBytes = stats.size;
+  // Export all data from database as JSON
+  static async exportAllData() {
+    const teachers = await pool.query('SELECT * FROM teachers ORDER BY id');
+    const students = await pool.query('SELECT * FROM students ORDER BY id');
+    const assignments = await pool.query('SELECT * FROM assignments ORDER BY id');
+    const assignmentTeachers = await pool.query('SELECT * FROM assignment_teachers ORDER BY id');
+    const assignmentStudents = await pool.query('SELECT * FROM assignment_students ORDER BY id');
+    const rooms = await pool.query('SELECT * FROM rooms ORDER BY id');
+    const timeSlots = await pool.query('SELECT * FROM time_slots ORDER BY id');
 
-      // Store metadata with PHT timestamp
-      const result = await pool.query(
-        `INSERT INTO backup_metadata
-         (filename, created_at, teachers_count, students_count, assignments_count, description, file_size_bytes)
-         VALUES ($1, NOW() AT TIME ZONE 'Asia/Manila', $2, $3, $4, $5, $6)
-         RETURNING *`,
-        [filename, counts.teachers, counts.students, counts.assignments, description, fileSizeBytes]
-      );
-
-      // Copy to second backup location (Desktop)
-      const desktopBackupDir = path.join(process.env.HOME || '/Users/icanacademy', 'Desktop', 'ICAN_Backups');
-      await fs.mkdir(desktopBackupDir, { recursive: true });
-      const desktopBackupPath = path.join(desktopBackupDir, filename);
-      await fs.copyFile(backupPath, desktopBackupPath);
-
-      console.log(`✓ Backup also saved to: ${desktopBackupPath}`);
-
-      return result.rows[0];
-    } catch (error) {
-      // Clean up failed backup file if it exists
-      try {
-        await fs.unlink(backupPath);
-      } catch (unlinkError) {
-        // Ignore if file doesn't exist
+    return {
+      version: '2.0',
+      exported_at: new Date().toISOString(),
+      tables: {
+        teachers: teachers.rows,
+        students: students.rows,
+        assignments: assignments.rows,
+        assignment_teachers: assignmentTeachers.rows,
+        assignment_students: assignmentStudents.rows,
+        rooms: rooms.rows,
+        time_slots: timeSlots.rows
       }
-      throw error;
-    }
+    };
   }
 
   // Get current database counts
@@ -119,21 +98,11 @@ class Backup {
 
   // Preview backup contents
   static async preview(filename) {
-    const backupDir = path.join(__dirname, '../../backups');
-    const backupPath = path.join(backupDir, filename);
-
-    // Check if file exists
-    try {
-      await fs.access(backupPath);
-    } catch {
-      throw new Error('Backup file not found');
-    }
-
     // Get metadata from database
     const metadata = await this.getByFilename(filename);
 
     if (!metadata) {
-      throw new Error('Backup metadata not found');
+      throw new Error('Backup not found');
     }
 
     return {
@@ -148,137 +117,169 @@ class Backup {
     };
   }
 
-  // Restore from backup
+  // Get backup data for download
+  static async getBackupData(filename) {
+    const result = await pool.query(
+      'SELECT backup_data FROM backup_metadata WHERE filename = $1',
+      [filename]
+    );
+
+    if (!result.rows[0]) {
+      throw new Error('Backup not found');
+    }
+
+    return result.rows[0].backup_data;
+  }
+
+  // Restore from backup (serverless-compatible)
   static async restore(filename, options = {}) {
     const {
       restoreTeachers = true,
       restoreStudents = true,
-      restoreAssignments = true,
-      specificDates = null
+      restoreAssignments = true
     } = options;
 
-    const backupDir = path.join(__dirname, '../../backups');
-    const backupPath = path.join(backupDir, filename);
+    // Get backup data from database
+    const result = await pool.query(
+      'SELECT backup_data FROM backup_metadata WHERE filename = $1',
+      [filename]
+    );
 
-    // Check if file exists
+    if (!result.rows[0] || !result.rows[0].backup_data) {
+      throw new Error('Backup not found or has no data');
+    }
+
+    const backupData = typeof result.rows[0].backup_data === 'string'
+      ? JSON.parse(result.rows[0].backup_data)
+      : result.rows[0].backup_data;
+
+    // Get counts before restore
+    const beforeCounts = await this.getCurrentCounts();
+    console.log(`\n=== Starting restore from ${filename} ===`);
+    console.log(`Before restore: ${beforeCounts.teachers} teachers, ${beforeCounts.students} students, ${beforeCounts.assignments} assignments`);
+
+    const client = await pool.connect();
+
     try {
-      await fs.access(backupPath);
-    } catch {
-      throw new Error('Backup file not found');
-    }
+      await client.query('BEGIN');
 
-    // For full restore
-    if (restoreTeachers && restoreStudents && restoreAssignments && !specificDates) {
-      const dbUser = process.env.DB_USER || 'postgres';
-      const dbName = process.env.DB_NAME || 'ol_scheduling_db';
-      // Container name is 'scheduling_db' but it hosts multiple databases
-      const containerName = 'scheduling_db';
-
-      try {
-        // Get counts before restore
-        const beforeCounts = await this.getCurrentCounts();
-        console.log(`\n=== Starting restore from ${filename} ===`);
-        console.log(`Before restore: ${beforeCounts.teachers} teachers, ${beforeCounts.students} students, ${beforeCounts.assignments} assignments`);
-
-        // Get expected counts from backup metadata
-        const metadata = await this.getByFilename(filename);
-        const expectedCounts = {
-          teachers: metadata?.teachers_count || 0,
-          students: metadata?.students_count || 0,
-          assignments: metadata?.assignments_count || 0
-        };
-        console.log(`Expected from backup: ${expectedCounts.teachers} teachers, ${expectedCounts.students} students, ${expectedCounts.assignments} assignments`);
-
-        // Use Docker to run psql inside the container
-        // The backup file includes DROP TABLE IF EXISTS and CREATE TABLE, so the restore is still safe
-        const command = `docker exec -i ${containerName} psql -U ${dbUser} -d ${dbName} < "${backupPath}"`;
-
-        console.log(`Executing: ${command}`);
-
-        const result = await execAsync(command, { maxBuffer: 10 * 1024 * 1024 }); // 10MB buffer for large output
-
-        // Check for errors in stderr that indicate real problems
-        if (result.stderr && result.stderr.includes('ERROR')) {
-          console.error(`Restore completed with errors:`);
-          console.error(result.stderr);
-          // Don't throw - some errors are harmless (like backup_metadata conflicts)
-        } else if (result.stderr) {
-          console.log(`Notices/Warnings: ${result.stderr}`);
-        }
-
-        // Verify restoration by getting counts
-        const afterCounts = await this.getCurrentCounts();
-        console.log(`After restore: ${afterCounts.teachers} teachers, ${afterCounts.students} students, ${afterCounts.assignments} assignments`);
-
-        // Only throw error if we expected data but got empty database
-        const expectingData = expectedCounts.teachers > 0 || expectedCounts.students > 0 || expectedCounts.assignments > 0;
-        const gotEmptyDatabase = afterCounts.teachers === 0 && afterCounts.students === 0 && afterCounts.assignments === 0;
-
-        if (expectingData && gotEmptyDatabase) {
-          throw new Error(`Restore failed: Expected ${expectedCounts.teachers} teachers, ${expectedCounts.students} students, ${expectedCounts.assignments} assignments but database is empty`);
-        }
-
-        // Reset all sequences to prevent duplicate key errors
-        console.log(`Resetting sequences...`);
-        await this.resetSequences();
-
-        console.log(`✓ Restore completed successfully`);
-
-        return {
-          success: true,
-          message: 'Full restore completed successfully',
-          before: beforeCounts,
-          after: afterCounts,
-          expected: expectedCounts,
-          warnings: result.stderr || null
-        };
-      } catch (error) {
-        // Provide detailed error information
-        console.error(`✗ Restore failed: ${error.message}`);
-        if (error.stderr) {
-          console.error(`stderr: ${error.stderr}`);
-        }
-        throw new Error(`Restore failed: ${error.message}\n${error.stderr || ''}`);
+      // Clear existing data in correct order (respect foreign keys)
+      if (restoreAssignments) {
+        await client.query('DELETE FROM assignment_students');
+        await client.query('DELETE FROM assignment_teachers');
+        await client.query('DELETE FROM assignments');
       }
-    }
+      if (restoreStudents) {
+        await client.query('DELETE FROM students');
+      }
+      if (restoreTeachers) {
+        await client.query('DELETE FROM teachers');
+      }
 
-    // For selective restore, we need to parse and execute specific parts
-    // This is complex - for now, throw an error and implement later if needed
-    throw new Error('Selective restore not yet implemented. Use full restore.');
+      // Restore data
+      const tables = backupData.tables;
+
+      if (restoreTeachers && tables.teachers) {
+        for (const row of tables.teachers) {
+          await client.query(
+            `INSERT INTO teachers (id, name, availability, color_keyword, date, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET name = $2, availability = $3, color_keyword = $4, date = $5, is_active = $6`,
+            [row.id, row.name, JSON.stringify(row.availability), row.color_keyword, row.date, row.is_active, row.created_at, row.updated_at]
+          );
+        }
+      }
+
+      if (restoreStudents && tables.students) {
+        for (const row of tables.students) {
+          await client.query(
+            `INSERT INTO students (id, name, english_name, availability, color_keyword, weakness_level, teacher_notes, date, is_active, created_at, updated_at, school, program_start_date, program_end_date, student_id, gender, grade, student_type, reading_score, grammar_score, listening_score, writing_score, reading_level, wpm, gbwt, subjects)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
+             ON CONFLICT (id) DO UPDATE SET name = $2, english_name = $3, availability = $4, color_keyword = $5, weakness_level = $6, teacher_notes = $7, date = $8, is_active = $9`,
+            [row.id, row.name, row.english_name, JSON.stringify(row.availability), row.color_keyword, row.weakness_level, row.teacher_notes, row.date, row.is_active, row.created_at, row.updated_at, row.school, row.program_start_date, row.program_end_date, row.student_id, row.gender, row.grade, row.student_type, row.reading_score, row.grammar_score, row.listening_score, row.writing_score, row.reading_level, row.wpm, row.gbwt, row.subjects]
+          );
+        }
+      }
+
+      if (restoreAssignments && tables.assignments) {
+        for (const row of tables.assignments) {
+          await client.query(
+            `INSERT INTO assignments (id, date, time_slot_id, room_id, notes, is_active, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (id) DO UPDATE SET date = $2, time_slot_id = $3, room_id = $4, notes = $5, is_active = $6`,
+            [row.id, row.date, row.time_slot_id, row.room_id, row.notes, row.is_active, row.created_at, row.updated_at]
+          );
+        }
+
+        if (tables.assignment_teachers) {
+          for (const row of tables.assignment_teachers) {
+            await client.query(
+              `INSERT INTO assignment_teachers (id, assignment_id, teacher_id, is_substitute)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (id) DO NOTHING`,
+              [row.id, row.assignment_id, row.teacher_id, row.is_substitute]
+            );
+          }
+        }
+
+        if (tables.assignment_students) {
+          for (const row of tables.assignment_students) {
+            await client.query(
+              `INSERT INTO assignment_students (id, assignment_id, student_id, submission_id)
+               VALUES ($1, $2, $3, $4)
+               ON CONFLICT (id) DO NOTHING`,
+              [row.id, row.assignment_id, row.student_id, row.submission_id]
+            );
+          }
+        }
+      }
+
+      await client.query('COMMIT');
+
+      // Reset sequences
+      await this.resetSequences();
+
+      // Get counts after restore
+      const afterCounts = await this.getCurrentCounts();
+      console.log(`After restore: ${afterCounts.teachers} teachers, ${afterCounts.students} students, ${afterCounts.assignments} assignments`);
+
+      return {
+        success: true,
+        message: 'Restore completed successfully',
+        before: beforeCounts,
+        after: afterCounts
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error(`✗ Restore failed: ${error.message}`);
+      throw new Error(`Restore failed: ${error.message}`);
+    } finally {
+      client.release();
+    }
   }
 
-  // Clean up old backups
+  // Clean up old backups (database only, no file system)
   static async cleanupOldBackups(keepCount = 30) {
-    const backupDir = path.join(__dirname, '../../backups');
-
-    // Get all backups ordered by created_at
     const result = await pool.query(
-      'SELECT filename FROM backup_metadata ORDER BY created_at DESC OFFSET $1',
+      'DELETE FROM backup_metadata WHERE id NOT IN (SELECT id FROM backup_metadata ORDER BY created_at DESC LIMIT $1) RETURNING filename',
       [keepCount]
     );
 
-    const oldBackups = result.rows;
-
-    for (const backup of oldBackups) {
-      try {
-        // Delete file
-        const filePath = path.join(backupDir, backup.filename);
-        await fs.unlink(filePath);
-
-        // Delete metadata
-        await pool.query('DELETE FROM backup_metadata WHERE filename = $1', [backup.filename]);
-      } catch (error) {
-        console.error(`Failed to delete old backup ${backup.filename}:`, error);
-      }
-    }
-
-    return { deleted: oldBackups.length };
+    return { deleted: result.rowCount };
   }
 
-  // Get backup file path for download
-  static getBackupPath(filename) {
-    const backupDir = path.join(__dirname, '../../backups');
-    return path.join(backupDir, filename);
+  // Get backup data for download (returns JSON string)
+  static async getBackupForDownload(filename) {
+    const result = await pool.query(
+      'SELECT backup_data FROM backup_metadata WHERE filename = $1',
+      [filename]
+    );
+
+    if (!result.rows[0]) {
+      throw new Error('Backup not found');
+    }
+
+    return result.rows[0].backup_data;
   }
 
   // Reset all sequences after restore to prevent duplicate key errors
@@ -306,106 +307,26 @@ class Backup {
 
   // Delete a specific backup
   static async delete(filename) {
-    const backupDir = path.join(__dirname, '../../backups');
-    const backupPath = path.join(backupDir, filename);
+    const result = await pool.query(
+      'DELETE FROM backup_metadata WHERE filename = $1 RETURNING filename',
+      [filename]
+    );
 
-    try {
-      // Delete file
-      await fs.unlink(backupPath);
-
-      // Delete metadata
-      await pool.query('DELETE FROM backup_metadata WHERE filename = $1', [filename]);
-
-      return { success: true };
-    } catch (error) {
-      throw new Error(`Failed to delete backup: ${error.message}`);
+    if (result.rowCount === 0) {
+      throw new Error('Backup not found');
     }
+
+    return { success: true };
   }
 
-  // Sync backup metadata with actual files on disk
+  // Sync is no longer needed for serverless (backups are stored in DB)
   static async syncWithFiles() {
-    const backupDir = path.join(__dirname, '../../backups');
-
-    // Get all backup files from directory
-    const files = await fs.readdir(backupDir);
-    const backupFiles = files.filter(f => f.endsWith('.sql') && f.startsWith('backup_'));
-    const backupFilesSet = new Set(backupFiles);
-
-    // Get existing metadata records
-    const existingResult = await pool.query('SELECT filename FROM backup_metadata');
-    const existingFilenames = new Set(existingResult.rows.map(r => r.filename));
-
-    const added = [];
-    const removed = [];
-    const skipped = [];
-
-    // Add metadata for files that don't have it
-    for (const filename of backupFiles) {
-      if (existingFilenames.has(filename)) {
-        skipped.push(filename);
-        continue;
-      }
-
-      try {
-        const backupPath = path.join(backupDir, filename);
-        const stats = await fs.stat(backupPath);
-        const fileSizeBytes = stats.size;
-        const createdAt = stats.birthtime; // File creation time
-
-        // Parse counts from backup file by actually counting data rows
-        const content = await fs.readFile(backupPath, 'utf8');
-
-        // Extract COPY blocks and count rows
-        const extractCount = (tableName) => {
-          // Find the COPY statement for this table
-          const regex = new RegExp(`COPY public\\.${tableName}[^\\n]*\\n([\\s\\S]*?)\\n\\\\\\.`, 'm');
-          const match = content.match(regex);
-          if (!match || !match[1]) return 0;
-
-          // Count non-empty lines in the data block
-          const dataLines = match[1].split('\n').filter(line => line.trim().length > 0);
-          return dataLines.length;
-        };
-
-        const teachersCount = extractCount('teachers');
-        const studentsCount = extractCount('students');
-        const assignmentsCount = extractCount('assignments');
-
-        // Insert metadata
-        await pool.query(
-          `INSERT INTO backup_metadata
-           (filename, created_at, teachers_count, students_count, assignments_count, description, file_size_bytes)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [filename, createdAt, teachersCount, studentsCount, assignmentsCount, 'Recovered from disk', fileSizeBytes]
-        );
-
-        added.push(filename);
-        console.log(`✓ Added metadata for: ${filename}`);
-      } catch (error) {
-        console.error(`✗ Failed to add metadata for ${filename}:`, error.message);
-      }
-    }
-
-    // Remove metadata for files that no longer exist
-    for (const filename of existingFilenames) {
-      if (!backupFilesSet.has(filename)) {
-        try {
-          await pool.query('DELETE FROM backup_metadata WHERE filename = $1', [filename]);
-          removed.push(filename);
-          console.log(`✓ Removed orphaned metadata for: ${filename}`);
-        } catch (error) {
-          console.error(`✗ Failed to remove metadata for ${filename}:`, error.message);
-        }
-      }
-    }
-
     return {
-      total_files: backupFiles.length,
-      added: added.length,
-      removed: removed.length,
-      skipped: skipped.length,
-      added_files: added,
-      removed_files: removed
+      message: 'Sync not needed - backups are stored in database',
+      total_files: 0,
+      added: 0,
+      removed: 0,
+      skipped: 0
     };
   }
 }

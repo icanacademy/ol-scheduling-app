@@ -184,5 +184,6 @@ CREATE TABLE IF NOT EXISTS backup_metadata (
   students_count INTEGER,
   assignments_count INTEGER,
   description TEXT,
-  file_size_bytes BIGINT
+  file_size_bytes BIGINT,
+  backup_data TEXT  -- JSON string containing full database backup data (for serverless)
 );

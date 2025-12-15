@@ -53,19 +53,20 @@ export const restoreBackup = async (req, res) => {
   }
 };
 
-// Download backup file
+// Download backup file (returns JSON data)
 export const downloadBackup = async (req, res) => {
   try {
     const { filename } = req.params;
-    const backupPath = Backup.getBackupPath(filename);
+    const backupData = await Backup.getBackupForDownload(filename);
 
-    res.download(backupPath, filename, (err) => {
-      if (err) {
-        res.status(404).json({ error: 'Backup file not found', message: err.message });
-      }
-    });
+    // Set headers for file download
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    // Send the backup data
+    res.send(backupData);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to download backup', message: error.message });
+    res.status(404).json({ error: 'Backup not found', message: error.message });
   }
 };
 
