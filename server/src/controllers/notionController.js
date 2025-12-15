@@ -3,6 +3,36 @@ import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
 import TimeSlot from '../models/TimeSlot.js';
 
+// Helper function to fetch all pages from Notion with pagination
+async function fetchAllNotionPages(notionApiKey, notionDatabaseId, queryBody = {}) {
+  const allResults = [];
+  let hasMore = true;
+  let nextCursor = undefined;
+
+  while (hasMore) {
+    const response = await axios.post(
+      `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
+      {
+        ...queryBody,
+        start_cursor: nextCursor
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${notionApiKey}`,
+          'Notion-Version': '2022-06-28',
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    allResults.push(...response.data.results);
+    hasMore = response.data.has_more;
+    nextCursor = response.data.next_cursor;
+  }
+
+  return allResults;
+}
+
 // Map Notion time values to 30-minute time slot IDs
 // This mapping assumes Notion still uses hour-based times
 // Each hour maps to two 30-minute slots
@@ -205,24 +235,14 @@ export const importTeachersFromNotion = async (req, res) => {
       });
     }
 
-    // Query Notion database - no filter so we get all teachers
-    const response = await axios.post(
-      `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${notionApiKey}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    // Query Notion database with pagination - no filter so we get all teachers
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
 
     const createdTeachers = [];
     const updatedTeachers = [];
     const errors = [];
 
-    for (const page of response.data.results) {
+    for (const page of allPages) {
       try {
         const nickname = (page.properties.Nickname?.rich_text?.[0]?.plain_text || '').trim();
         
@@ -306,20 +326,9 @@ export const previewStudentsFromNotion = async (req, res) => {
       });
     }
 
-    // Query Notion database
-    const response = await axios.post(
-      `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${notionApiKey}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    // Query Notion database with pagination
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
 
-    const data = response.data;
     const students = [];
     const errors = [];
 
@@ -327,7 +336,7 @@ export const previewStudentsFromNotion = async (req, res) => {
     const existingStudents = await Student.getAll(date);
     const existingNames = new Set(existingStudents.map(s => s.name.toLowerCase()));
 
-    for (const page of data.results) {
+    for (const page of allPages) {
       try {
         // Try multiple field names for student name
         const name = (page.properties['Full Name']?.title?.[0]?.plain_text || 
@@ -401,24 +410,14 @@ export const importStudentsFromNotion = async (req, res) => {
       });
     }
 
-    // Query Notion database
-    const response = await axios.post(
-      `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
-      {},
-      {
-        headers: {
-          'Authorization': `Bearer ${notionApiKey}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
-        }
-      }
-    );
+    // Query Notion database with pagination
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
 
     const createdStudents = [];
     const updatedStudents = [];
     const errors = [];
 
-    for (const page of response.data.results) {
+    for (const page of allPages) {
       try {
         // Try multiple field names for student name (same as preview function)
         const name = (page.properties['Full Name']?.title?.[0]?.plain_text || 
@@ -522,33 +521,23 @@ export const getAllNotionStudents = async (req, res) => {
       });
     }
 
-    // Query the Notion database for active students only
-    const response = await axios.post(
-      `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
-      {
-        filter: {
-          property: 'Status',
-          select: {
-            equals: 'Active'
-          }
-        },
-        sorts: [
-          {
-            property: 'Full Name',
-            direction: 'ascending'
-          }
-        ]
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${notionApiKey}`,
-          'Notion-Version': '2022-06-28',
-          'Content-Type': 'application/json'
+    // Query the Notion database for active students only with pagination
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId, {
+      filter: {
+        property: 'Status',
+        select: {
+          equals: 'Active'
         }
-      }
-    );
+      },
+      sorts: [
+        {
+          property: 'Full Name',
+          direction: 'ascending'
+        }
+      ]
+    });
 
-    const students = response.data.results.map(page => {
+    const students = allPages.map(page => {
       // Debug: Log the Student ID property structure
       console.log(`Student: ${page.properties['Full Name']?.title?.[0]?.plain_text}`);
       console.log('Student ID property:', JSON.stringify(page.properties['Student ID'], null, 2));

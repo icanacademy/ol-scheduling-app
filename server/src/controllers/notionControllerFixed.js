@@ -1,25 +1,18 @@
 import axios from 'axios';
 
-// Simple preview that just returns teachers with full availability
-export const previewTeachersFromNotion = async (req, res) => {
-  console.log('Preview teachers called');
-  try {
-    const notionApiKey = process.env.NOTION_API_KEY;
-    const notionDatabaseId = process.env.NOTION_TEACHERS_DATABASE_ID;
-    
-    console.log('API Key exists:', !!notionApiKey);
-    console.log('Database ID:', notionDatabaseId);
+// Helper function to fetch all pages from Notion with pagination
+async function fetchAllNotionPages(notionApiKey, notionDatabaseId, queryBody = {}) {
+  const allResults = [];
+  let hasMore = true;
+  let nextCursor = undefined;
 
-    if (!notionApiKey || !notionDatabaseId) {
-      return res.status(500).json({
-        error: 'Notion API credentials not configured'
-      });
-    }
-
-    // Query Notion database
+  while (hasMore) {
     const response = await axios.post(
       `https://api.notion.com/v1/databases/${notionDatabaseId}/query`,
-      {},
+      {
+        ...queryBody,
+        start_cursor: nextCursor
+      },
       {
         headers: {
           'Authorization': `Bearer ${notionApiKey}`,
@@ -29,11 +22,38 @@ export const previewTeachersFromNotion = async (req, res) => {
       }
     );
 
+    allResults.push(...response.data.results);
+    hasMore = response.data.has_more;
+    nextCursor = response.data.next_cursor;
+  }
+
+  return allResults;
+}
+
+// Simple preview that just returns teachers with full availability
+export const previewTeachersFromNotion = async (req, res) => {
+  console.log('Preview teachers called');
+  try {
+    const notionApiKey = process.env.NOTION_API_KEY;
+    const notionDatabaseId = process.env.NOTION_TEACHERS_DATABASE_ID;
+
+    console.log('API Key exists:', !!notionApiKey);
+    console.log('Database ID:', notionDatabaseId);
+
+    if (!notionApiKey || !notionDatabaseId) {
+      return res.status(500).json({
+        error: 'Notion API credentials not configured'
+      });
+    }
+
+    // Query Notion database with pagination
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
+
     const teachers = [];
-    
-    for (const page of response.data.results) {
+
+    for (const page of allPages) {
       const nickname = page.properties.Nickname?.rich_text?.[0]?.plain_text || '';
-      
+
       if (nickname) {
         teachers.push({
           name: nickname,
@@ -50,12 +70,12 @@ export const previewTeachersFromNotion = async (req, res) => {
       total: teachers.length,
       errors: []
     });
-    
+
   } catch (error) {
     console.error('Error:', error.message);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to preview teachers from Notion',
-      details: error.message 
+      details: error.message
     });
   }
 };

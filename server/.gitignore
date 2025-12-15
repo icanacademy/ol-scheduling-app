@@ -7,3 +7,5 @@ build/
 
 # Database backups
 backups/
+.vercel
+.env*.local
