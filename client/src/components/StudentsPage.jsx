@@ -182,14 +182,18 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
             
             if (!studentExists) {
               // Create a copy of student data for this specific day
+              // Map camelCase fields from Notion to snake_case for the API
               const studentData = {
                 ...student,
                 date: targetDate,
-                // Remove selectedDays from the data sent to server
-                selectedDays: undefined
+                korean_name: student.koreanName || '',
+                // Remove selectedDays and koreanName from the data sent to server
+                selectedDays: undefined,
+                koreanName: undefined
               };
               delete studentData.selectedDays;
-              
+              delete studentData.koreanName;
+
               await createStudent(studentData);
             } else {
               console.log(`Student ${student.name} already exists for ${day}, skipping...`);
@@ -283,26 +287,29 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     return classDays;
   };
 
-  // Helper function to determine student status
+  // Helper function to determine student status (checks entire week, not just selected day)
   const getStudentStatus = (student) => {
     if (!student.availability || student.availability.length === 0) {
       return 'stopped';
     }
 
-    if (!assignments || assignments.length === 0) {
+    // Check weekAssignments (all days) instead of just selectedDate assignments
+    if (!weekAssignments) {
       return 'need-teachers';
     }
 
-    // Check if student has any assignments
-    const studentAssignments = assignments.filter(assignment => 
-      assignment.students?.some(s => s.id === student.id)
-    );
-
-    if (studentAssignments.length === 0) {
-      return 'need-teachers';
+    // Check if student has any assignments across the entire week
+    for (const day of Object.keys(weekAssignments)) {
+      const dayAssignments = weekAssignments[day] || [];
+      const studentAssignments = dayAssignments.filter(assignment =>
+        assignment.students?.some(s => s.id === student.id)
+      );
+      if (studentAssignments.length > 0) {
+        return 'assigned';
+      }
     }
 
-    return 'assigned';
+    return 'need-teachers';
   };
 
   // Filter students by search term and selected day with deduplication and sorting
@@ -502,7 +509,12 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
                       >
                         <div>
                           <div className="flex items-center gap-2">
-                            <div className="font-medium">{student.name}</div>
+                            <div>
+                              <div className="font-medium">{student.name}</div>
+                              {student.korean_name && (
+                                <div className="text-xs text-gray-500">{student.korean_name}</div>
+                              )}
+                            </div>
                             {(() => {
                               const status = getStudentStatus(student);
                               const statusConfig = {

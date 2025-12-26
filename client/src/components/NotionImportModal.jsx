@@ -204,7 +204,10 @@ function NotionImportModal({ isOpen, onClose, type, selectedDate, onPreview, onI
                       />
                       <div className="flex-1">
                         <div className="font-semibold">{item.name}</div>
-                        {item.englishName && (
+                        {item.koreanName && (
+                          <div className="text-sm text-gray-500">{item.koreanName}</div>
+                        )}
+                        {item.englishName && item.englishName !== item.name && (
                           <div className="text-sm text-gray-600">{item.englishName}</div>
                         )}
                         <div className="text-sm text-gray-500">
