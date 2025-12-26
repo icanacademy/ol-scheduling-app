@@ -182,7 +182,7 @@ export const previewTeachersFromNotion = async (req, res) => {
     for (const page of data.results) {
       try {
         const nickname = (page.properties.Nickname?.rich_text?.[0]?.plain_text || '').trim();
-        
+
         // Skip teachers without nicknames
         if (!nickname) {
           continue;
@@ -340,18 +340,21 @@ export const previewStudentsFromNotion = async (req, res) => {
     for (const page of allPages) {
       try {
         // Try multiple field names for student name
-        const name = (page.properties['Full Name']?.title?.[0]?.plain_text || 
+        const name = (page.properties['Full Name']?.title?.[0]?.plain_text ||
                      page.properties['Student']?.title?.[0]?.plain_text ||
                      page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim();
-        
+
+        // Get Korean name from Notion
+        const koreanName = (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim();
+
         // Get grade level from Notion
         const grade = page.properties['Grade']?.rich_text?.[0]?.plain_text || '';
-        
+
         // Get time preferences from Start Time and End Time (select fields)
         const startTime = page.properties['Start Time']?.select?.name || '';
         const endTime = page.properties['End Time']?.select?.name || '';
         let preferredTime = '';
-        
+
         if (startTime && endTime) {
           preferredTime = `${startTime} - ${endTime}`;
         } else if (startTime) {
@@ -374,6 +377,7 @@ export const previewStudentsFromNotion = async (req, res) => {
 
         students.push({
           name: name,
+          koreanName: koreanName,
           grade: grade,
           preferredTime: preferredTime,
           exists: false
@@ -427,13 +431,16 @@ export const importStudentsFromNotion = async (req, res) => {
     for (const page of allPages) {
       try {
         // Try multiple field names for student name (same as preview function)
-        const name = (page.properties['Full Name']?.title?.[0]?.plain_text || 
+        const name = (page.properties['Full Name']?.title?.[0]?.plain_text ||
                      page.properties['Student']?.title?.[0]?.plain_text ||
                      page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim();
-        
+
+        // Get Korean name from Notion
+        const koreanName = (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim();
+
         // Get grade level from Notion
         const grade = page.properties['Grade']?.rich_text?.[0]?.plain_text || '';
-        
+
         // Get time preferences from Start Time and End Time (select fields)
         const startTime = page.properties['Start Time']?.select?.name || '';
         const endTime = page.properties['End Time']?.select?.name || '';
@@ -461,6 +468,7 @@ export const importStudentsFromNotion = async (req, res) => {
 
         const studentData = {
           name: name,
+          korean_name: koreanName,
           grade: grade,
           availability: availability,
           color_keyword: 'blue',
@@ -475,6 +483,7 @@ export const importStudentsFromNotion = async (req, res) => {
           student = await Student.reactivate(existingStudent.id, studentData);
           updatedStudents.push({
             name: name,
+            koreanName: koreanName,
             preferredTime: startTime && endTime ? `${startTime} - ${endTime}` : 'All day',
             slots: 0
           });
@@ -482,6 +491,7 @@ export const importStudentsFromNotion = async (req, res) => {
           student = await Student.create(studentData);
           createdStudents.push({
             name: name,
+            koreanName: koreanName,
             preferredTime: startTime && endTime ? `${startTime} - ${endTime}` : 'All day',
             slots: 0
           });
@@ -548,11 +558,11 @@ export const getAllNotionStudents = async (req, res) => {
       // Debug: Log the Student ID property structure
       console.log(`Student: ${page.properties['Full Name']?.title?.[0]?.plain_text}`);
       console.log('Student ID property:', JSON.stringify(page.properties['Student ID'], null, 2));
-      
+
       // Handle Prefix field type specifically
       let studentId = '';
       const studentIdProp = page.properties['Student ID'];
-      
+
       if (studentIdProp) {
         if (studentIdProp.unique_id) {
           // For Prefix/Unique ID fields - combine prefix and number
@@ -571,14 +581,17 @@ export const getAllNotionStudents = async (req, res) => {
           studentId = String(studentIdProp.formula.number);
         }
       }
-      
+
       console.log('Extracted Student ID:', studentId);
       console.log('---');
-      
+
+      // Get Korean name from Notion
+      const koreanName = (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim();
+
       // Get gender from Notion
-      const gender = page.properties['Gender']?.select?.name || 
-                    page.properties['Gender']?.rich_text?.[0]?.plain_text || 
-                    page.properties['Sex']?.select?.name || 
+      const gender = page.properties['Gender']?.select?.name ||
+                    page.properties['Gender']?.rich_text?.[0]?.plain_text ||
+                    page.properties['Sex']?.select?.name ||
                     page.properties['Sex']?.rich_text?.[0]?.plain_text || '';
 
       // Get start date from Notion (try different possible field names)
@@ -590,10 +603,11 @@ export const getAllNotionStudents = async (req, res) => {
 
       return {
         notionId: page.id,
-        name: (page.properties['Full Name']?.title?.[0]?.plain_text || 
+        name: (page.properties['Full Name']?.title?.[0]?.plain_text ||
                page.properties['Student']?.title?.[0]?.plain_text ||
                page.properties['English Name']?.rich_text?.[0]?.plain_text || 'Unknown').trim(),
-        englishName: (page.properties['Full Name']?.title?.[0]?.plain_text || 
+        koreanName: koreanName,
+        englishName: (page.properties['Full Name']?.title?.[0]?.plain_text ||
                      page.properties['Student']?.title?.[0]?.plain_text ||
                      page.properties['English Name']?.rich_text?.[0]?.plain_text || 'Unknown').trim(),
         grade: page.properties['Grade']?.rich_text?.[0]?.plain_text || '',
@@ -642,10 +656,11 @@ export const getNotionStudentById = async (req, res) => {
     // Extract all student information - adapting for current database structure
     const studentData = {
       notionId: page.id,
-      fullName: (page.properties['Full Name']?.title?.[0]?.plain_text || 
+      fullName: (page.properties['Full Name']?.title?.[0]?.plain_text ||
                 page.properties['Student']?.title?.[0]?.plain_text ||
                 page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim(),
-      englishName: (page.properties['Full Name']?.title?.[0]?.plain_text || 
+      koreanName: (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim(),
+      englishName: (page.properties['Full Name']?.title?.[0]?.plain_text ||
                    page.properties['Student']?.title?.[0]?.plain_text ||
                    page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim(),
       grade: page.properties['Grade']?.rich_text?.[0]?.plain_text || '',
