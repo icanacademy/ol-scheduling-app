@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTeachers, getTimeSlots, deleteTeacher, updateTeacher, deleteAllTeachers, previewTeachersFromNotion, importTeachersFromNotion, createTeacher, getAssignments, getAssignmentsByDateRange } from '../services/api';
-import { dayToDate, weekDays } from '../utils/dayMapping';
+import { dayToDate, weekDays, dateToDay } from '../utils/dayMapping';
 import TeacherFormModal from './TeacherFormModal';
 import NotionImportModal from './NotionImportModal';
 
@@ -12,15 +12,76 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  // Fetch teachers for the selected date
-  const { data: teachers, isLoading: teachersLoading } = useQuery({
+  // Day abbreviations for display
+  const dayAbbrev = {
+    'Monday': 'Mon',
+    'Tuesday': 'Tue',
+    'Wednesday': 'Wed',
+    'Thursday': 'Thu',
+    'Friday': 'Fri',
+    'Saturday': 'Sat',
+    'Sunday': 'Sun'
+  };
+
+  // Fetch teachers for the selected date (single day mode)
+  const { data: teachersForDate, isLoading: teachersLoading } = useQuery({
     queryKey: ['teachers', selectedDate],
     queryFn: async () => {
       const response = await getTeachers(selectedDate);
       return response.data;
     },
-    enabled: !!selectedDate,
+    enabled: !!selectedDate && !isAllWeekMode,
   });
+
+  // Fetch teachers for ALL 7 days (All Week mode)
+  const { data: allWeekTeachers, isLoading: allWeekTeachersLoading } = useQuery({
+    queryKey: ['teachers', 'all-week-teachers-page'],
+    queryFn: async () => {
+      const teachersByDay = {};
+      for (const day of weekDays) {
+        const date = dayToDate(day);
+        const response = await getTeachers(date);
+        teachersByDay[day] = response.data || [];
+      }
+      return teachersByDay;
+    },
+    enabled: isAllWeekMode,
+  });
+
+  // Create availability lookup: teacherName -> day -> availability[]
+  const teacherAvailabilityByDay = useMemo(() => {
+    if (!isAllWeekMode || !allWeekTeachers) return {};
+    const lookup = {};
+
+    Object.entries(allWeekTeachers).forEach(([day, dayTeachers]) => {
+      dayTeachers.forEach(teacher => {
+        if (!lookup[teacher.name]) {
+          lookup[teacher.name] = {};
+        }
+        lookup[teacher.name][day] = teacher.availability || [];
+      });
+    });
+
+    return lookup;
+  }, [isAllWeekMode, allWeekTeachers]);
+
+  // Get combined teachers list
+  const teachers = useMemo(() => {
+    if (isAllWeekMode) {
+      if (!allWeekTeachers) return [];
+      const uniqueTeachers = new Map();
+      Object.values(allWeekTeachers).forEach(dayTeachers => {
+        dayTeachers.forEach(teacher => {
+          if (!uniqueTeachers.has(teacher.name)) {
+            uniqueTeachers.set(teacher.name, teacher);
+          }
+        });
+      });
+      return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      return teachersForDate || [];
+    }
+  }, [isAllWeekMode, teachersForDate, allWeekTeachers]);
 
   // Fetch time slots for display
   const { data: timeSlots } = useQuery({
@@ -287,7 +348,10 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     };
   };
 
-  if (teachersLoading) {
+  // Check if loading
+  const isLoading = isAllWeekMode ? allWeekTeachersLoading : teachersLoading;
+
+  if (isLoading) {
     return <div className="text-center py-8">Loading teachers...</div>;
   }
 
@@ -327,7 +391,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
               <h3 className="text-lg font-semibold text-blue-800">All Week Mode</h3>
             </div>
             <p className="text-sm text-blue-700">
-              You are viewing teachers in All Week mode. Changes to availability will update the reference record.
+              Showing aggregated availability across all 7 days. Each cell shows day badges indicating availability status.
             </p>
           </div>
         )}
@@ -335,24 +399,41 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
         {/* Legend */}
         <div className="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-3">
           <h3 className="text-lg font-semibold text-gray-800 mb-3">Legend</h3>
-          <div className="grid grid-cols-3 gap-4 text-sm">
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-red-600 rounded flex items-center justify-center">
-                <span className="text-white text-xs font-bold">#</span>
+          {isAllWeekMode ? (
+            <div className="flex flex-wrap gap-6 text-sm">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 bg-red-500 text-white rounded text-[10px] font-bold">Mon</span>
+                <span><strong>Has Class</strong> - Teacher has class on that day</span>
               </div>
-              <span><strong>Has Class</strong> - Teacher has assigned students (Red)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-green-600 rounded flex items-center justify-center">
-                <span className="text-white text-xs font-bold">✓</span>
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 bg-green-500 text-white rounded text-[10px] font-bold">Tue</span>
+                <span><strong>Free</strong> - Available but no class</span>
               </div>
-              <span><strong>Available</strong> - Teacher is available but no class (Green)</span>
+              <div className="flex items-center gap-2">
+                <span className="text-gray-400 text-[10px]">Off: Wed</span>
+                <span><strong>Off</strong> - Not available that day</span>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="w-6 h-6 bg-gray-200 rounded"></div>
-              <span><strong>Unavailable</strong> - Teacher is not available (Gray)</span>
+          ) : (
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-red-600 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">#</span>
+                </div>
+                <span><strong>Has Class</strong> - Teacher has assigned students (Red)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-green-600 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">✓</span>
+                </div>
+                <span><strong>Available</strong> - Teacher is available but no class (Green)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-gray-200 rounded"></div>
+                <span><strong>Unavailable</strong> - Teacher is not available (Gray)</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Search */}
@@ -423,17 +504,102 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                         {teacher.name}
                       </td>
                       {timeSlots?.map((slot, index) => {
+                        // Determine background color based on position
+                        const bgColor = Math.floor(index / 2) % 2 === 0 ? '#eff6ff' : '#f3f4f6'; // blue-50 or gray-50
+
+                        if (isAllWeekMode) {
+                          // All Week mode - show aggregated availability per day
+                          const classDays = [];
+                          const freeDays = [];
+                          const offDays = [];
+
+                          weekDays.forEach(day => {
+                            const availability = teacherAvailabilityByDay[teacher.name]?.[day] || [];
+                            const isAvailableOnDay = availability.includes(slot.id);
+
+                            // Check if has class on this day
+                            const dayAssignments = assignments?.filter(a => {
+                              const assignmentDay = dateToDay(a.date);
+                              return assignmentDay === day &&
+                                     a.time_slot_id === slot.id &&
+                                     a.teachers?.some(t => t.name === teacher.name);
+                            }) || [];
+                            const hasClassOnDay = dayAssignments.length > 0;
+
+                            if (hasClassOnDay) {
+                              classDays.push(day);
+                            } else if (isAvailableOnDay) {
+                              freeDays.push(day);
+                            } else {
+                              offDays.push(day);
+                            }
+                          });
+
+                          // If off all week, show empty cell
+                          if (offDays.length === 7) {
+                            return (
+                              <td
+                                key={slot.id}
+                                className="px-1 py-1 text-center border border-gray-300"
+                                style={{ backgroundColor: bgColor }}
+                                title="Not available all week"
+                              >
+                                <span className="text-gray-400 text-xs">—</span>
+                              </td>
+                            );
+                          }
+
+                          return (
+                            <td
+                              key={slot.id}
+                              className="px-1 py-1 text-center border border-gray-300"
+                              style={{ backgroundColor: bgColor }}
+                              title={`Class: ${classDays.map(d => dayAbbrev[d]).join(', ') || 'None'} | Free: ${freeDays.map(d => dayAbbrev[d]).join(', ') || 'None'} | Off: ${offDays.map(d => dayAbbrev[d]).join(', ') || 'None'}`}
+                            >
+                              <div className="space-y-0.5">
+                                {classDays.length > 0 && (
+                                  <div className="flex flex-wrap gap-0.5 justify-center">
+                                    {classDays.map(day => (
+                                      <span
+                                        key={day}
+                                        className="px-1 py-0.5 bg-red-500 text-white rounded text-[8px] font-bold"
+                                      >
+                                        {dayAbbrev[day]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {freeDays.length > 0 && (
+                                  <div className="flex flex-wrap gap-0.5 justify-center">
+                                    {freeDays.map(day => (
+                                      <span
+                                        key={day}
+                                        className="px-1 py-0.5 bg-green-500 text-white rounded text-[8px] font-bold"
+                                      >
+                                        {dayAbbrev[day]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {offDays.length > 0 && offDays.length < 7 && (
+                                  <div className="text-[7px] text-gray-400">
+                                    Off: {offDays.map(d => dayAbbrev[d]).join(',')}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        }
+
+                        // Single day mode - original logic
                         const isAvailable = teacher.availability?.includes(slot.id);
                         const classInfo = getTeacherClassInfo(teacher.name, slot.id);
 
-                        // Determine background color based on position
-                        const bgColor = Math.floor(index / 2) % 2 === 0 ? '#eff6ff' : '#f3f4f6'; // blue-50 or gray-50
-                        
                         // Determine cell styling based on availability and class assignment
                         let cellStyle = { backgroundColor: bgColor };
                         let cellContent = null;
                         let titleText = 'Not available - Click to add';
-                        
+
                         if (classInfo.hasClass) {
                           // Teacher has a class - show with bright red background
                           cellStyle = {
