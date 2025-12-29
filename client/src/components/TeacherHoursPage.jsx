@@ -18,7 +18,7 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     },
   });
 
-  // Fetch teachers for the selected date
+  // Fetch teachers for the selected date (single day mode)
   const { data: teachersRaw, isLoading: teachersLoading } = useQuery({
     queryKey: ['teachers', selectedDate],
     queryFn: async () => {
@@ -26,20 +26,66 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
       const response = await getTeachers(selectedDate);
       return response.data || [];
     },
-    enabled: !!selectedDate,
+    enabled: !!selectedDate && !isAllWeekMode,
   });
+
+  // Fetch teachers for ALL 7 days (All Week mode)
+  const { data: allWeekTeachers, isLoading: allWeekTeachersLoading } = useQuery({
+    queryKey: ['teachers', 'all-week'],
+    queryFn: async () => {
+      const teachersByDay = {};
+      for (const day of weekDays) {
+        const date = dayToDate(day);
+        const response = await getTeachers(date);
+        teachersByDay[day] = response.data || [];
+      }
+      return teachersByDay;
+    },
+    enabled: isAllWeekMode,
+  });
+
+  // Create availability lookup: teacherName -> day -> availability[]
+  const teacherAvailabilityByDay = useMemo(() => {
+    if (!isAllWeekMode || !allWeekTeachers) return {};
+    const lookup = {};
+
+    Object.entries(allWeekTeachers).forEach(([day, dayTeachers]) => {
+      dayTeachers.forEach(teacher => {
+        if (!lookup[teacher.name]) {
+          lookup[teacher.name] = {};
+        }
+        lookup[teacher.name][day] = teacher.availability || [];
+      });
+    });
+
+    return lookup;
+  }, [isAllWeekMode, allWeekTeachers]);
 
   // Deduplicate teachers by name
   const teachers = useMemo(() => {
-    if (!teachersRaw) return [];
-    const uniqueTeachers = new Map();
-    teachersRaw.forEach(teacher => {
-      if (!uniqueTeachers.has(teacher.name)) {
-        uniqueTeachers.set(teacher.name, teacher);
-      }
-    });
-    return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [teachersRaw]);
+    if (isAllWeekMode) {
+      if (!allWeekTeachers) return [];
+      const uniqueTeachers = new Map();
+      // Collect all unique teachers from all days
+      Object.values(allWeekTeachers).forEach(dayTeachers => {
+        dayTeachers.forEach(teacher => {
+          if (!uniqueTeachers.has(teacher.name)) {
+            uniqueTeachers.set(teacher.name, teacher);
+          }
+        });
+      });
+      return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
+    } else {
+      if (!teachersRaw) return [];
+      const uniqueTeachers = new Map();
+      teachersRaw.forEach(teacher => {
+        if (!uniqueTeachers.has(teacher.name)) {
+          uniqueTeachers.set(teacher.name, teacher);
+        }
+      });
+      return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
+    }
+  }, [isAllWeekMode, teachersRaw, allWeekTeachers]);
 
   // Fetch assignments (single day or all week)
   const { data: assignments, isLoading: assignmentsLoading } = useQuery({
@@ -84,55 +130,86 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     'Sunday': 'Sun'
   };
 
-  // For All Week mode: track class days per (teacher, timeSlot)
+  // For All Week mode: track class days, free days, and off days per (teacher, timeSlot)
   const weeklyStats = useMemo(() => {
     if (!isAllWeekMode || !assignments) return {};
     const stats = {};
 
+    // First, collect all class days from assignments
+    const classDaysMap = {}; // key -> Set of day names
     assignments.forEach(assignment => {
       assignment.teachers?.forEach(teacher => {
         const key = `${teacher.name}-${assignment.time_slot_id}`;
-        if (!stats[key]) {
-          stats[key] = { classDays: new Set(), classDayNames: [] };
+        if (!classDaysMap[key]) {
+          classDaysMap[key] = new Set();
         }
         const dayName = dateToDay(assignment.date);
-        if (dayName && !stats[key].classDays.has(dayName)) {
-          stats[key].classDays.add(dayName);
-          stats[key].classDayNames.push(dayName);
+        if (dayName) {
+          classDaysMap[key].add(dayName);
         }
       });
     });
 
-    // Sort class days in order (Mon-Sun)
-    Object.values(stats).forEach(stat => {
-      stat.classDayNames.sort((a, b) => weekDays.indexOf(a) - weekDays.indexOf(b));
+    // Now calculate stats for each teacher at each time slot
+    teachers.forEach(teacher => {
+      timeSlots?.forEach(slot => {
+        const key = `${teacher.name}-${slot.id}`;
+        const classDays = [];
+        const freeDays = [];
+        const offDays = [];
+
+        weekDays.forEach(day => {
+          const availability = teacherAvailabilityByDay[teacher.name]?.[day] || [];
+          const isAvailable = availability.includes(slot.id);
+          const hasClass = classDaysMap[key]?.has(day) || false;
+
+          if (hasClass) {
+            classDays.push(day);
+          } else if (isAvailable) {
+            freeDays.push(day);
+          } else {
+            offDays.push(day);
+          }
+        });
+
+        stats[key] = { classDays, freeDays, offDays };
+      });
     });
 
     return stats;
-  }, [isAllWeekMode, assignments]);
+  }, [isAllWeekMode, assignments, teachers, timeSlots, teacherAvailabilityByDay]);
 
   // Get cell status for a teacher at a time slot
   const getCellStatus = (teacher, timeSlotId) => {
-    const isAvailable = teacher.availability?.includes(timeSlotId);
     const key = `${teacher.name}-${timeSlotId}`;
     const teacherAssignments = assignmentMap[key] || [];
 
-    if (!isAvailable) {
-      return { status: 'unavailable', display: '—' };
-    }
-
     if (isAllWeekMode) {
       const stats = weeklyStats[key];
-      if (stats && stats.classDays.size > 0) {
-        const classDayCount = stats.classDays.size;
-        const freeDayCount = 7 - classDayCount;
-        return {
-          status: 'mixed',
-          classDayNames: stats.classDayNames,
-          freeDays: freeDayCount
-        };
+      if (!stats) {
+        return { status: 'unavailable', display: '—' };
       }
-      return { status: 'free', display: 'Free', freeDays: 7 };
+
+      const { classDays, freeDays, offDays } = stats;
+
+      // If teacher is off all week at this time
+      if (offDays.length === 7) {
+        return { status: 'unavailable', display: '—' };
+      }
+
+      return {
+        status: 'weekly',
+        classDays,
+        freeDays,
+        offDays
+      };
+    }
+
+    // Single day mode
+    const isAvailable = teacher.availability?.includes(timeSlotId);
+
+    if (!isAvailable) {
+      return { status: 'unavailable', display: '—' };
     }
 
     if (teacherAssignments.length > 0) {
@@ -180,15 +257,15 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
         return 'bg-green-100 text-green-700 cursor-pointer hover:bg-green-200';
       case 'busy':
         return 'bg-blue-200 text-blue-800';
-      case 'mixed':
-        return 'bg-yellow-100 text-yellow-800';
+      case 'weekly':
+        return 'bg-white';
       case 'unavailable':
       default:
         return 'bg-gray-100 text-gray-400';
     }
   };
 
-  const isLoading = timeSlotsLoading || teachersLoading || assignmentsLoading;
+  const isLoading = timeSlotsLoading || teachersLoading || assignmentsLoading || allWeekTeachersLoading;
 
   if (isLoading) {
     return (
@@ -215,19 +292,38 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
             ? 'Showing aggregated availability for the entire week'
             : `Showing availability for ${selectedDay}`}
         </p>
-        <div className="flex gap-4 mt-2 text-xs">
-          <span className="flex items-center gap-1">
-            <span className="w-4 h-4 rounded bg-green-100 border border-green-300"></span>
-            Free (click to assign)
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-4 h-4 rounded bg-blue-200 border border-blue-300"></span>
-            Has Class
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-4 h-4 rounded bg-gray-100 border border-gray-300"></span>
-            Unavailable
-          </span>
+        <div className="flex gap-4 mt-2 text-xs flex-wrap">
+          {isAllWeekMode ? (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 bg-blue-500 text-white rounded text-[10px] font-medium">Mon</span>
+                Has Class
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 bg-green-500 text-white rounded text-[10px] font-medium">Tue</span>
+                Free (available, no class)
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="text-gray-400 text-[10px]">Off: Wed</span>
+                Not available
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-green-100 border border-green-300"></span>
+                Free (click to assign)
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-blue-200 border border-blue-300"></span>
+                Has Class
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-4 h-4 rounded bg-gray-100 border border-gray-300"></span>
+                Unavailable
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -278,34 +374,50 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
                       onClick={isClickable ? () => handleFreeClick(teacher, slot.id) : undefined}
                       title={cell.status === 'busy' ? `${cell.display} ${cell.subDisplay}` : cell.display}
                     >
-                      {/* All Week mode with classes - show day badges */}
-                      {cell.status === 'mixed' && cell.classDayNames && (
-                        <div>
-                          <div className="flex flex-wrap gap-1 justify-center mb-1">
-                            {cell.classDayNames.map(day => (
-                              <span
-                                key={day}
-                                className="px-1.5 py-0.5 bg-blue-500 text-white rounded text-[10px] font-medium"
-                              >
-                                {dayAbbrev[day]}
-                              </span>
-                            ))}
-                          </div>
-                          {cell.freeDays > 0 && (
-                            <div className="text-[10px] text-green-600 font-medium">
-                              Free: {cell.freeDays} day{cell.freeDays !== 1 ? 's' : ''}
+                      {/* All Week mode - show Class/Free/Off badges */}
+                      {cell.status === 'weekly' && (
+                        <div className="space-y-1">
+                          {/* Class days - Blue badges */}
+                          {cell.classDays.length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 justify-center">
+                              {cell.classDays.map(day => (
+                                <span
+                                  key={day}
+                                  className="px-1 py-0.5 bg-blue-500 text-white rounded text-[9px] font-medium"
+                                  title={`Has class on ${day}`}
+                                >
+                                  {dayAbbrev[day]}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Free days - Green badges */}
+                          {cell.freeDays.length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 justify-center">
+                              {cell.freeDays.map(day => (
+                                <span
+                                  key={day}
+                                  className="px-1 py-0.5 bg-green-500 text-white rounded text-[9px] font-medium"
+                                  title={`Free on ${day}`}
+                                >
+                                  {dayAbbrev[day]}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {/* Off days - Gray text (only show if there are some) */}
+                          {cell.offDays.length > 0 && cell.offDays.length < 7 && (
+                            <div className="text-[9px] text-gray-400">
+                              Off: {cell.offDays.map(d => dayAbbrev[d]).join(', ')}
                             </div>
                           )}
                         </div>
                       )}
-                      {/* All Week mode - all free */}
-                      {cell.status === 'free' && isAllWeekMode && (
-                        <div className="font-medium text-green-700">Free all week</div>
-                      )}
-                      {/* Single day mode - Free or Busy */}
-                      {cell.status === 'free' && !isAllWeekMode && (
+                      {/* Single day mode - Free */}
+                      {cell.status === 'free' && (
                         <div className="font-medium">{cell.display}</div>
                       )}
+                      {/* Single day mode - Busy */}
                       {cell.status === 'busy' && (
                         <>
                           <div className="font-medium">{cell.display}</div>
