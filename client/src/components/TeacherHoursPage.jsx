@@ -18,20 +18,19 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     },
   });
 
-  // Fetch teachers for the selected date (single day mode)
-  const { data: teachersRaw, isLoading: teachersLoading } = useQuery({
+  // Fetch teachers for the selected date (same as Teachers tab)
+  const { data: teachersForDate, isLoading: teachersLoading } = useQuery({
     queryKey: ['teachers', selectedDate],
     queryFn: async () => {
-      if (!selectedDate) return [];
       const response = await getTeachers(selectedDate);
       return response.data || [];
     },
-    enabled: !!selectedDate && !isAllWeekMode,
+    enabled: !!selectedDate,
   });
 
   // Fetch teachers for ALL 7 days (All Week mode)
   const { data: allWeekTeachers, isLoading: allWeekTeachersLoading } = useQuery({
-    queryKey: ['teachers', 'all-week'],
+    queryKey: ['teachers', 'all-week-hours'],
     queryFn: async () => {
       const teachersByDay = {};
       for (const day of weekDays) {
@@ -61,7 +60,7 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     return lookup;
   }, [isAllWeekMode, allWeekTeachers]);
 
-  // Deduplicate teachers by name
+  // Get teachers list - use date-specific data for single day, aggregate for all week
   const teachers = useMemo(() => {
     if (isAllWeekMode) {
       if (!allWeekTeachers) return [];
@@ -76,16 +75,11 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
       });
       return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
     } else {
-      if (!teachersRaw) return [];
-      const uniqueTeachers = new Map();
-      teachersRaw.forEach(teacher => {
-        if (!uniqueTeachers.has(teacher.name)) {
-          uniqueTeachers.set(teacher.name, teacher);
-        }
-      });
-      return Array.from(uniqueTeachers.values()).sort((a, b) => a.name.localeCompare(b.name));
+      // Single day mode - use teachers directly from the API (same as Teachers tab)
+      if (!teachersForDate) return [];
+      return [...teachersForDate].sort((a, b) => a.name.localeCompare(b.name));
     }
-  }, [isAllWeekMode, teachersRaw, allWeekTeachers]);
+  }, [isAllWeekMode, teachersForDate, allWeekTeachers]);
 
   // Fetch assignments (single day or all week)
   const { data: assignments, isLoading: assignmentsLoading } = useQuery({
