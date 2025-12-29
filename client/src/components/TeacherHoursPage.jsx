@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { getTeachers, getAssignments, getAssignmentsByDateRange, getTimeSlots } from '../services/api';
-import { weekDays, dayToDate } from '../utils/dayMapping';
+import { weekDays, dayToDate, dateToDay } from '../utils/dayMapping';
 import AssignmentModal from './AssignmentModal';
 
 function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
@@ -73,7 +73,18 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     return map;
   }, [assignments]);
 
-  // For All Week mode: count class days per (teacher, timeSlot)
+  // Day abbreviations for display
+  const dayAbbrev = {
+    'Monday': 'Mon',
+    'Tuesday': 'Tue',
+    'Wednesday': 'Wed',
+    'Thursday': 'Thu',
+    'Friday': 'Fri',
+    'Saturday': 'Sat',
+    'Sunday': 'Sun'
+  };
+
+  // For All Week mode: track class days per (teacher, timeSlot)
   const weeklyStats = useMemo(() => {
     if (!isAllWeekMode || !assignments) return {};
     const stats = {};
@@ -82,10 +93,19 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
       assignment.teachers?.forEach(teacher => {
         const key = `${teacher.name}-${assignment.time_slot_id}`;
         if (!stats[key]) {
-          stats[key] = { classDays: new Set(), totalDays: 7 };
+          stats[key] = { classDays: new Set(), classDayNames: [] };
         }
-        stats[key].classDays.add(assignment.date);
+        const dayName = dateToDay(assignment.date);
+        if (dayName && !stats[key].classDays.has(dayName)) {
+          stats[key].classDays.add(dayName);
+          stats[key].classDayNames.push(dayName);
+        }
       });
+    });
+
+    // Sort class days in order (Mon-Sun)
+    Object.values(stats).forEach(stat => {
+      stat.classDayNames.sort((a, b) => weekDays.indexOf(a) - weekDays.indexOf(b));
     });
 
     return stats;
@@ -108,13 +128,11 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
         const freeDayCount = 7 - classDayCount;
         return {
           status: 'mixed',
-          display: `Class ${classDayCount}/7`,
-          subDisplay: freeDayCount > 0 ? `Free ${freeDayCount}/7` : null,
-          classDays: classDayCount,
+          classDayNames: stats.classDayNames,
           freeDays: freeDayCount
         };
       }
-      return { status: 'free', display: 'Free 7/7' };
+      return { status: 'free', display: 'Free', freeDays: 7 };
     }
 
     if (teacherAssignments.length > 0) {
@@ -260,9 +278,45 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
                       onClick={isClickable ? () => handleFreeClick(teacher, slot.id) : undefined}
                       title={cell.status === 'busy' ? `${cell.display} ${cell.subDisplay}` : cell.display}
                     >
-                      <div className="font-medium">{cell.display}</div>
-                      {cell.subDisplay && (
-                        <div className="text-xs opacity-75">{cell.subDisplay}</div>
+                      {/* All Week mode with classes - show day badges */}
+                      {cell.status === 'mixed' && cell.classDayNames && (
+                        <div>
+                          <div className="flex flex-wrap gap-1 justify-center mb-1">
+                            {cell.classDayNames.map(day => (
+                              <span
+                                key={day}
+                                className="px-1.5 py-0.5 bg-blue-500 text-white rounded text-[10px] font-medium"
+                              >
+                                {dayAbbrev[day]}
+                              </span>
+                            ))}
+                          </div>
+                          {cell.freeDays > 0 && (
+                            <div className="text-[10px] text-green-600 font-medium">
+                              Free: {cell.freeDays} day{cell.freeDays !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      {/* All Week mode - all free */}
+                      {cell.status === 'free' && isAllWeekMode && (
+                        <div className="font-medium text-green-700">Free all week</div>
+                      )}
+                      {/* Single day mode - Free or Busy */}
+                      {cell.status === 'free' && !isAllWeekMode && (
+                        <div className="font-medium">{cell.display}</div>
+                      )}
+                      {cell.status === 'busy' && (
+                        <>
+                          <div className="font-medium">{cell.display}</div>
+                          {cell.subDisplay && (
+                            <div className="text-xs opacity-75">{cell.subDisplay}</div>
+                          )}
+                        </>
+                      )}
+                      {/* Unavailable */}
+                      {cell.status === 'unavailable' && (
+                        <div className="font-medium">{cell.display}</div>
                       )}
                     </td>
                   );
