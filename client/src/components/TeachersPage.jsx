@@ -12,13 +12,18 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
 
-  // Drag selection state
+  // Drag selection state - using refs to avoid stale closure issues
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState(null);
   const [dragEnd, setDragEnd] = useState(null);
   const [selectedCells, setSelectedCells] = useState(new Set());
   const [dragMode, setDragMode] = useState(null); // 'add' or 'remove'
   const tableRef = useRef(null);
+
+  // Refs to store latest values for the mouseup handler
+  const selectedCellsRef = useRef(new Set());
+  const dragModeRef = useRef(null);
+  const isDraggingRef = useRef(false);
 
   // Copy from teacher state
   const [copyFromTeacherId, setCopyFromTeacherId] = useState('');
@@ -262,23 +267,34 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     e.preventDefault();
 
     const isCurrentlyAvailable = teacher.availability?.includes(timeSlotId);
-    setDragMode(isCurrentlyAvailable ? 'remove' : 'add');
+    const mode = isCurrentlyAvailable ? 'remove' : 'add';
+    const initialCells = new Set([getCellKey(teacher.id, timeSlotId)]);
+
+    // Update both state and refs
+    setDragMode(mode);
     setIsDragging(true);
     setDragStart({ teacherId: teacher.id, timeSlotId });
     setDragEnd({ teacherId: teacher.id, timeSlotId });
-    setSelectedCells(new Set([getCellKey(teacher.id, timeSlotId)]));
+    setSelectedCells(initialCells);
+
+    // Update refs immediately for the mouseup handler
+    dragModeRef.current = mode;
+    isDraggingRef.current = true;
+    selectedCellsRef.current = initialCells;
   };
 
   const handleDragEnter = (teacher, timeSlotId) => {
-    if (!isDragging || isAllWeekMode) return;
+    if (!isDraggingRef.current || isAllWeekMode) return;
 
     setDragEnd({ teacherId: teacher.id, timeSlotId });
 
     // Calculate all cells in the rectangle between dragStart and current position
-    const startTeacherIdx = filteredTeachers.findIndex(t => t.id === dragStart.teacherId);
+    const startTeacherIdx = filteredTeachers.findIndex(t => t.id === dragStart?.teacherId);
     const endTeacherIdx = filteredTeachers.findIndex(t => t.id === teacher.id);
-    const startSlotIdx = timeSlots.findIndex(ts => ts.id === dragStart.timeSlotId);
-    const endSlotIdx = timeSlots.findIndex(ts => ts.id === timeSlotId);
+    const startSlotIdx = timeSlots?.findIndex(ts => ts.id === dragStart?.timeSlotId) ?? -1;
+    const endSlotIdx = timeSlots?.findIndex(ts => ts.id === timeSlotId) ?? -1;
+
+    if (startTeacherIdx === -1 || startSlotIdx === -1) return;
 
     const minTeacherIdx = Math.min(startTeacherIdx, endTeacherIdx);
     const maxTeacherIdx = Math.max(startTeacherIdx, endTeacherIdx);
@@ -295,7 +311,10 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
         }
       }
     }
+
+    // Update both state and ref
     setSelectedCells(newSelectedCells);
+    selectedCellsRef.current = newSelectedCells;
   };
 
   // Check if a cell is in the current drag selection
@@ -492,13 +511,18 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   // Global mouseup handler to end drag selection when mouse leaves table
   useEffect(() => {
     const handleGlobalMouseUp = async () => {
-      if (!isDragging || selectedCells.size === 0) return;
+      // Use refs to get the latest values
+      if (!isDraggingRef.current || selectedCellsRef.current.size === 0) return;
+
+      const cellsToProcess = new Set(selectedCellsRef.current);
+      const currentDragMode = dragModeRef.current;
+
+      // Clear refs and state immediately
+      isDraggingRef.current = false;
+      selectedCellsRef.current = new Set();
+      dragModeRef.current = null;
 
       setIsDragging(false);
-      const cellsToProcess = new Set(selectedCells);
-      const currentDragMode = dragMode;
-
-      // Clear UI state immediately for responsiveness
       setSelectedCells(new Set());
       setDragStart(null);
       setDragEnd(null);
@@ -564,7 +588,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
 
     document.addEventListener('mouseup', handleGlobalMouseUp);
     return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [isDragging, selectedCells, dragMode, filteredTeachers, updateAvailabilityMutation]);
+  }, [filteredTeachers, updateAvailabilityMutation]);
 
   // Helper to get time slot names
   const getTimeSlotNames = (availability) => {
