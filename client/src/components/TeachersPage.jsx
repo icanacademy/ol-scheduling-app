@@ -28,6 +28,14 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   // Copy from teacher state
   const [copyFromTeacherId, setCopyFromTeacherId] = useState('');
 
+  // Class details modal state (for All Week view)
+  const [classDetailsModal, setClassDetailsModal] = useState({
+    isOpen: false,
+    teacherName: '',
+    timeSlot: null,
+    classDetails: [] // Array of { day, students, room, subject, notes }
+  });
+
   // Day abbreviations for display
   const dayAbbrev = {
     'Monday': 'Mon',
@@ -602,17 +610,17 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   // Helper to check if teacher has a class at specific time slot
   const getTeacherClassInfo = (teacherName, timeSlotId) => {
     if (!assignments || !assignments.length) return { hasClass: false, students: [] };
-    
+
     // Find assignments for this teacher and time slot
-    const teacherAssignments = assignments.filter(assignment => 
+    const teacherAssignments = assignments.filter(assignment =>
       assignment.time_slot_id === timeSlotId &&
       assignment.teachers?.some(teacher => teacher.name === teacherName)
     );
-    
+
     if (teacherAssignments.length === 0) {
       return { hasClass: false, students: [] };
     }
-    
+
     // Collect all students from assignments
     const students = teacherAssignments.reduce((acc, assignment) => {
       if (assignment.students) {
@@ -620,15 +628,79 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       }
       return acc;
     }, []);
-    
+
     // Remove duplicates and get unique student names
     const uniqueStudents = [...new Set(students)];
-    
+
     return {
       hasClass: true,
       students: uniqueStudents,
       assignmentCount: teacherAssignments.length
     };
+  };
+
+  // Helper to get detailed class info for All Week view (per day)
+  const getWeeklyClassDetails = (teacherName, timeSlotId) => {
+    if (!assignments || !assignments.length) return [];
+
+    const details = [];
+    weekDays.forEach(day => {
+      const dayAssignments = assignments.filter(a => {
+        const assignmentDay = dateToDay(a.date);
+        return assignmentDay === day &&
+               a.time_slot_id === timeSlotId &&
+               a.teachers?.some(t => t.name === teacherName);
+      });
+
+      if (dayAssignments.length > 0) {
+        dayAssignments.forEach(assignment => {
+          details.push({
+            day,
+            dayAbbrev: dayAbbrev[day],
+            students: assignment.students?.map(s => s.name) || [],
+            room: assignment.room?.name || 'No room',
+            subject: assignment.subject || '',
+            notes: assignment.notes || ''
+          });
+        });
+      }
+    });
+
+    return details;
+  };
+
+  // Build tooltip text for All Week view cell
+  const buildWeeklyTooltip = (teacherName, timeSlotId, classDays) => {
+    if (classDays.length === 0) return '';
+
+    const lines = [];
+    classDays.forEach(day => {
+      const dayAssignments = assignments?.filter(a => {
+        const assignmentDay = dateToDay(a.date);
+        return assignmentDay === day &&
+               a.time_slot_id === timeSlotId &&
+               a.teachers?.some(t => t.name === teacherName);
+      }) || [];
+
+      dayAssignments.forEach(assignment => {
+        const students = assignment.students?.map(s => s.name).join(', ') || 'No students';
+        const room = assignment.room?.name || 'No room';
+        lines.push(`${dayAbbrev[day]}: ${students} (${room})`);
+      });
+    });
+
+    return lines.join('\n');
+  };
+
+  // Open class details modal
+  const openClassDetailsModal = (teacherName, timeSlot) => {
+    const details = getWeeklyClassDetails(teacherName, timeSlot.id);
+    setClassDetailsModal({
+      isOpen: true,
+      teacherName,
+      timeSlot,
+      classDetails: details
+    });
   };
 
   // Check if loading
@@ -906,24 +978,49 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                             );
                           }
 
+                          // Build detailed tooltip with student names
+                          const tooltipText = classDays.length > 0
+                            ? buildWeeklyTooltip(teacher.name, slot.id, classDays) +
+                              (freeDays.length > 0 ? `\n\nFree: ${freeDays.map(d => dayAbbrev[d]).join(', ')}` : '') +
+                              (offDays.length > 0 ? `\nOff: ${offDays.map(d => dayAbbrev[d]).join(', ')}` : '') +
+                              '\n\n(Click for details)'
+                            : `Free: ${freeDays.map(d => dayAbbrev[d]).join(', ') || 'None'}\nOff: ${offDays.map(d => dayAbbrev[d]).join(', ') || 'None'}`;
+
                           return (
                             <td
                               key={slot.id}
-                              className="px-1 py-1 text-center border border-gray-300"
+                              className={`px-1 py-1 text-center border border-gray-300 ${classDays.length > 0 ? 'cursor-pointer hover:opacity-80' : ''}`}
                               style={{ backgroundColor: bgColor }}
-                              title={`Class: ${classDays.map(d => dayAbbrev[d]).join(', ') || 'None'} | Free: ${freeDays.map(d => dayAbbrev[d]).join(', ') || 'None'} | Off: ${offDays.map(d => dayAbbrev[d]).join(', ') || 'None'}`}
+                              title={tooltipText}
+                              onClick={() => {
+                                if (classDays.length > 0) {
+                                  openClassDetailsModal(teacher.name, slot);
+                                }
+                              }}
                             >
                               <div className="space-y-0.5">
                                 {classDays.length > 0 && (
                                   <div className="flex flex-wrap gap-0.5 justify-center">
-                                    {classDays.map(day => (
-                                      <span
-                                        key={day}
-                                        className="px-1 py-0.5 bg-red-500 text-white rounded text-[8px] font-bold"
-                                      >
-                                        {dayAbbrev[day]}
-                                      </span>
-                                    ))}
+                                    {classDays.map(day => {
+                                      // Get student count for this day
+                                      const dayAssignments = assignments?.filter(a => {
+                                        const assignmentDay = dateToDay(a.date);
+                                        return assignmentDay === day &&
+                                               a.time_slot_id === slot.id &&
+                                               a.teachers?.some(t => t.name === teacher.name);
+                                      }) || [];
+                                      const studentCount = dayAssignments.reduce((sum, a) => sum + (a.students?.length || 0), 0);
+
+                                      return (
+                                        <span
+                                          key={day}
+                                          className="px-1 py-0.5 bg-red-500 text-white rounded text-[8px] font-bold"
+                                          title={`${day}: ${studentCount} student(s)`}
+                                        >
+                                          {dayAbbrev[day]}{studentCount > 0 ? `:${studentCount}` : ''}
+                                        </span>
+                                      );
+                                    })}
                                   </div>
                                 )}
                                 {freeDays.length > 0 && (
@@ -1084,6 +1181,108 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
           onPreview={handlePreviewFromNotion}
           onImport={handleImportFromNotion}
         />
+      )}
+
+      {/* Class Details Modal for All Week View */}
+      {classDetailsModal.isOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-white">
+                    {classDetailsModal.teacherName}
+                  </h2>
+                  <p className="text-blue-100 text-sm">
+                    {classDetailsModal.timeSlot?.name} • Weekly Class Details
+                  </p>
+                </div>
+                <button
+                  onClick={() => setClassDetailsModal({ ...classDetailsModal, isOpen: false })}
+                  className="text-white hover:bg-white/20 rounded-full p-2 transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto max-h-[60vh]">
+              {classDetailsModal.classDetails.length === 0 ? (
+                <p className="text-gray-500 text-center py-8">No classes scheduled for this time slot.</p>
+              ) : (
+                <div className="space-y-4">
+                  {classDetailsModal.classDetails.map((detail, index) => (
+                    <div
+                      key={index}
+                      className="bg-gray-50 rounded-lg p-4 border border-gray-200"
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="px-3 py-1 bg-red-500 text-white rounded-full text-sm font-bold">
+                          {detail.day}
+                        </span>
+                        <span className="text-gray-600 text-sm">
+                          Room: <strong>{detail.room}</strong>
+                        </span>
+                        {detail.subject && (
+                          <span className="text-gray-600 text-sm">
+                            Subject: <strong>{detail.subject}</strong>
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="mb-2">
+                        <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                          Students ({detail.students.length}):
+                        </h4>
+                        {detail.students.length > 0 ? (
+                          <div className="flex flex-wrap gap-2">
+                            {detail.students.map((student, sIdx) => (
+                              <span
+                                key={sIdx}
+                                className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-sm"
+                              >
+                                {student}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-gray-400 text-sm">No students assigned</p>
+                        )}
+                      </div>
+
+                      {detail.notes && (
+                        <div className="mt-2 pt-2 border-t border-gray-200">
+                          <p className="text-sm text-gray-600">
+                            <strong>Notes:</strong> {detail.notes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+              <div className="flex justify-between items-center">
+                <p className="text-sm text-gray-500">
+                  {classDetailsModal.classDetails.length} class{classDetailsModal.classDetails.length !== 1 ? 'es' : ''} this week
+                </p>
+                <button
+                  onClick={() => setClassDetailsModal({ ...classDetailsModal, isOpen: false })}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>
