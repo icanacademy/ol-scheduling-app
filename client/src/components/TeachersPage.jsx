@@ -354,68 +354,6 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     return selectedCells.has(getCellKey(teacherId, timeSlotId));
   };
 
-  // Global mouseup handler to end drag selection when mouse leaves table
-  useEffect(() => {
-    const handleGlobalMouseUp = async () => {
-      if (isDragging) {
-        setIsDragging(false);
-
-        // Apply changes to all selected cells
-        const updates = [];
-        for (const cellKey of selectedCells) {
-          const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
-          const teacherId = parseInt(teacherIdStr);
-          const timeSlotId = parseInt(timeSlotIdStr);
-          const teacher = filteredTeachers.find(t => t.id === teacherId);
-
-          if (teacher) {
-            const currentAvailability = teacher.availability || [];
-            let newAvailability;
-
-            if (dragMode === 'add') {
-              newAvailability = currentAvailability.includes(timeSlotId)
-                ? currentAvailability
-                : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
-            } else {
-              newAvailability = currentAvailability.filter(id => id !== timeSlotId);
-            }
-
-            if (JSON.stringify([...currentAvailability].sort()) !== JSON.stringify([...newAvailability].sort())) {
-              updates.push({
-                teacher,
-                newAvailability
-              });
-            }
-          }
-        }
-
-        // Apply all updates
-        for (const update of updates) {
-          try {
-            await updateAvailabilityMutation.mutateAsync({
-              id: update.teacher.id,
-              data: {
-                name: update.teacher.name,
-                availability: update.newAvailability,
-                color_keyword: update.teacher.color_keyword,
-              },
-            });
-          } catch (error) {
-            console.error('Failed to update:', error);
-          }
-        }
-
-        setSelectedCells(new Set());
-        setDragStart(null);
-        setDragEnd(null);
-        setDragMode(null);
-      }
-    };
-
-    document.addEventListener('mouseup', handleGlobalMouseUp);
-    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
-  }, [isDragging, selectedCells, dragMode, filteredTeachers]);
-
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: deleteTeacher,
@@ -601,6 +539,68 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       teacher.name.toLowerCase().includes(searchTerm.toLowerCase())
     );
   }, [teachers, searchTerm]);
+
+  // Global mouseup handler to end drag selection when mouse leaves table
+  useEffect(() => {
+    const handleGlobalMouseUp = async () => {
+      if (isDragging) {
+        setIsDragging(false);
+
+        // Apply changes to all selected cells
+        const updates = [];
+        for (const cellKey of selectedCells) {
+          const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
+          const teacherId = parseInt(teacherIdStr);
+          const timeSlotId = parseInt(timeSlotIdStr);
+          const teacher = filteredTeachers.find(t => t.id === teacherId);
+
+          if (teacher) {
+            const currentAvailability = teacher.availability || [];
+            let newAvailability;
+
+            if (dragMode === 'add') {
+              newAvailability = currentAvailability.includes(timeSlotId)
+                ? currentAvailability
+                : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
+            } else {
+              newAvailability = currentAvailability.filter(id => id !== timeSlotId);
+            }
+
+            if (JSON.stringify([...currentAvailability].sort()) !== JSON.stringify([...newAvailability].sort())) {
+              updates.push({
+                teacher,
+                newAvailability
+              });
+            }
+          }
+        }
+
+        // Apply all updates
+        for (const update of updates) {
+          try {
+            await updateAvailabilityMutation.mutateAsync({
+              id: update.teacher.id,
+              data: {
+                name: update.teacher.name,
+                availability: update.newAvailability,
+                color_keyword: update.teacher.color_keyword,
+              },
+            });
+          } catch (error) {
+            console.error('Failed to update:', error);
+          }
+        }
+
+        setSelectedCells(new Set());
+        setDragStart(null);
+        setDragEnd(null);
+        setDragMode(null);
+      }
+    };
+
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [isDragging, selectedCells, dragMode, filteredTeachers, updateAvailabilityMutation]);
 
   // Helper to get time slot names
   const getTimeSlotNames = (availability) => {
