@@ -298,57 +298,6 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     setSelectedCells(newSelectedCells);
   };
 
-  const handleDragEnd = async () => {
-    if (!isDragging || isAllWeekMode) return;
-    setIsDragging(false);
-
-    // Apply changes to all selected cells
-    const updates = [];
-    for (const cellKey of selectedCells) {
-      const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
-      const teacherId = parseInt(teacherIdStr);
-      const timeSlotId = parseInt(timeSlotIdStr);
-      const teacher = filteredTeachers.find(t => t.id === teacherId);
-
-      if (teacher) {
-        const currentAvailability = teacher.availability || [];
-        let newAvailability;
-
-        if (dragMode === 'add') {
-          newAvailability = currentAvailability.includes(timeSlotId)
-            ? currentAvailability
-            : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
-        } else {
-          newAvailability = currentAvailability.filter(id => id !== timeSlotId);
-        }
-
-        if (JSON.stringify(currentAvailability.sort()) !== JSON.stringify(newAvailability.sort())) {
-          updates.push({
-            teacher,
-            newAvailability
-          });
-        }
-      }
-    }
-
-    // Apply all updates
-    for (const update of updates) {
-      await updateAvailabilityMutation.mutateAsync({
-        id: update.teacher.id,
-        data: {
-          name: update.teacher.name,
-          availability: update.newAvailability,
-          color_keyword: update.teacher.color_keyword,
-        },
-      });
-    }
-
-    setSelectedCells(new Set());
-    setDragStart(null);
-    setDragEnd(null);
-    setDragMode(null);
-  };
-
   // Check if a cell is in the current drag selection
   const isCellSelected = (teacherId, timeSlotId) => {
     return selectedCells.has(getCellKey(teacherId, timeSlotId));
@@ -1011,7 +960,6 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                             style={cellStyle}
                             onMouseDown={(e) => handleDragStart(teacher, slot.id, e)}
                             onMouseEnter={() => handleDragEnter(teacher, slot.id)}
-                            onMouseUp={handleDragEnd}
                             title={titleText}
                           >
                             {cellContent}
