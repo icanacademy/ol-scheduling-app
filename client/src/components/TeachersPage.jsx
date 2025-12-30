@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getTeachers, getTimeSlots, deleteTeacher, updateTeacher, deleteAllTeachers, previewTeachersFromNotion, importTeachersFromNotion, createTeacher, getAssignments, getAssignmentsByDateRange } from '../services/api';
 import { dayToDate, weekDays, dateToDay } from '../utils/dayMapping';
@@ -11,6 +11,17 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   const [editingTeacher, setEditingTeacher] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  // Drag selection state
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState(null);
+  const [dragEnd, setDragEnd] = useState(null);
+  const [selectedCells, setSelectedCells] = useState(new Set());
+  const [dragMode, setDragMode] = useState(null); // 'add' or 'remove'
+  const tableRef = useRef(null);
+
+  // Copy from teacher state
+  const [copyFromTeacherId, setCopyFromTeacherId] = useState('');
 
   // Day abbreviations for display
   const dayAbbrev = {
@@ -120,6 +131,290 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       alert('Failed to update teacher availability');
     },
   });
+
+  // Preset templates based on time slots (8 AM to 10 PM, 30-min slots = 28 total)
+  // Slots 1-8: 8 AM - 12 PM (Morning)
+  // Slots 9-12: 12 PM - 2 PM (Lunch)
+  // Slots 13-20: 2 PM - 6 PM (Afternoon)
+  // Slots 21-28: 6 PM - 10 PM (Evening)
+  const presetTemplates = useMemo(() => {
+    if (!timeSlots) return [];
+    const allIds = timeSlots.map(ts => ts.id);
+    const morningIds = timeSlots.filter((_, i) => i < 8).map(ts => ts.id); // 8 AM - 12 PM
+    const afternoonIds = timeSlots.filter((_, i) => i >= 8 && i < 20).map(ts => ts.id); // 12 PM - 6 PM
+    const eveningIds = timeSlots.filter((_, i) => i >= 20).map(ts => ts.id); // 6 PM - 10 PM
+    const workdayIds = timeSlots.filter((_, i) => i >= 2 && i < 20).map(ts => ts.id); // 9 AM - 6 PM
+
+    return [
+      { name: 'Full Day', ids: allIds, color: 'bg-blue-600' },
+      { name: 'Work Hours (9-6)', ids: workdayIds, color: 'bg-green-600' },
+      { name: 'Morning (8-12)', ids: morningIds, color: 'bg-yellow-600' },
+      { name: 'Afternoon (12-6)', ids: afternoonIds, color: 'bg-orange-600' },
+      { name: 'Evening (6-10)', ids: eveningIds, color: 'bg-purple-600' },
+      { name: 'Clear All', ids: [], color: 'bg-gray-600' },
+    ];
+  }, [timeSlots]);
+
+  // Apply preset to a teacher
+  const applyPresetToTeacher = async (teacher, presetIds) => {
+    try {
+      await updateAvailabilityMutation.mutateAsync({
+        id: teacher.id,
+        data: {
+          name: teacher.name,
+          availability: presetIds,
+          color_keyword: teacher.color_keyword,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to apply preset:', error);
+    }
+  };
+
+  // Toggle entire column (time slot) for all visible teachers
+  const handleToggleColumn = async (timeSlotId) => {
+    if (isAllWeekMode) return; // Disable in All Week mode
+
+    const teachersToUpdate = filteredTeachers.filter(t => t.id);
+    if (teachersToUpdate.length === 0) return;
+
+    // Check if majority have this slot - if so, remove from all; otherwise add to all
+    const countWithSlot = teachersToUpdate.filter(t => t.availability?.includes(timeSlotId)).length;
+    const shouldAdd = countWithSlot < teachersToUpdate.length / 2;
+
+    for (const teacher of teachersToUpdate) {
+      const currentAvailability = teacher.availability || [];
+      let newAvailability;
+
+      if (shouldAdd) {
+        newAvailability = currentAvailability.includes(timeSlotId)
+          ? currentAvailability
+          : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
+      } else {
+        newAvailability = currentAvailability.filter(id => id !== timeSlotId);
+      }
+
+      if (JSON.stringify(currentAvailability.sort()) !== JSON.stringify(newAvailability.sort())) {
+        await updateAvailabilityMutation.mutateAsync({
+          id: teacher.id,
+          data: {
+            name: teacher.name,
+            availability: newAvailability,
+            color_keyword: teacher.color_keyword,
+          },
+        });
+      }
+    }
+  };
+
+  // Toggle entire row (all time slots) for a teacher
+  const handleToggleRow = async (teacher) => {
+    if (isAllWeekMode) return; // Disable in All Week mode
+    if (!timeSlots) return;
+
+    const allSlotIds = timeSlots.map(ts => ts.id);
+    const currentAvailability = teacher.availability || [];
+
+    // If teacher has more than half slots, clear all; otherwise fill all
+    const shouldFillAll = currentAvailability.length < allSlotIds.length / 2;
+    const newAvailability = shouldFillAll ? allSlotIds : [];
+
+    try {
+      await updateAvailabilityMutation.mutateAsync({
+        id: teacher.id,
+        data: {
+          name: teacher.name,
+          availability: newAvailability,
+          color_keyword: teacher.color_keyword,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to toggle row:', error);
+    }
+  };
+
+  // Copy availability from another teacher
+  const handleCopyFromTeacher = async (targetTeacher, sourceTeacherId) => {
+    if (!sourceTeacherId) return;
+
+    const sourceTeacher = teachers.find(t => t.id === parseInt(sourceTeacherId));
+    if (!sourceTeacher) return;
+
+    try {
+      await updateAvailabilityMutation.mutateAsync({
+        id: targetTeacher.id,
+        data: {
+          name: targetTeacher.name,
+          availability: sourceTeacher.availability || [],
+          color_keyword: targetTeacher.color_keyword,
+        },
+      });
+    } catch (error) {
+      console.error('Failed to copy availability:', error);
+    }
+  };
+
+  // Drag selection handlers
+  const getCellKey = (teacherId, timeSlotId) => `${teacherId}-${timeSlotId}`;
+
+  const handleDragStart = (teacher, timeSlotId, e) => {
+    if (isAllWeekMode) return;
+    e.preventDefault();
+
+    const isCurrentlyAvailable = teacher.availability?.includes(timeSlotId);
+    setDragMode(isCurrentlyAvailable ? 'remove' : 'add');
+    setIsDragging(true);
+    setDragStart({ teacherId: teacher.id, timeSlotId });
+    setDragEnd({ teacherId: teacher.id, timeSlotId });
+    setSelectedCells(new Set([getCellKey(teacher.id, timeSlotId)]));
+  };
+
+  const handleDragEnter = (teacher, timeSlotId) => {
+    if (!isDragging || isAllWeekMode) return;
+
+    setDragEnd({ teacherId: teacher.id, timeSlotId });
+
+    // Calculate all cells in the rectangle between dragStart and current position
+    const startTeacherIdx = filteredTeachers.findIndex(t => t.id === dragStart.teacherId);
+    const endTeacherIdx = filteredTeachers.findIndex(t => t.id === teacher.id);
+    const startSlotIdx = timeSlots.findIndex(ts => ts.id === dragStart.timeSlotId);
+    const endSlotIdx = timeSlots.findIndex(ts => ts.id === timeSlotId);
+
+    const minTeacherIdx = Math.min(startTeacherIdx, endTeacherIdx);
+    const maxTeacherIdx = Math.max(startTeacherIdx, endTeacherIdx);
+    const minSlotIdx = Math.min(startSlotIdx, endSlotIdx);
+    const maxSlotIdx = Math.max(startSlotIdx, endSlotIdx);
+
+    const newSelectedCells = new Set();
+    for (let ti = minTeacherIdx; ti <= maxTeacherIdx; ti++) {
+      for (let si = minSlotIdx; si <= maxSlotIdx; si++) {
+        const t = filteredTeachers[ti];
+        const s = timeSlots[si];
+        if (t && s) {
+          newSelectedCells.add(getCellKey(t.id, s.id));
+        }
+      }
+    }
+    setSelectedCells(newSelectedCells);
+  };
+
+  const handleDragEnd = async () => {
+    if (!isDragging || isAllWeekMode) return;
+    setIsDragging(false);
+
+    // Apply changes to all selected cells
+    const updates = [];
+    for (const cellKey of selectedCells) {
+      const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
+      const teacherId = parseInt(teacherIdStr);
+      const timeSlotId = parseInt(timeSlotIdStr);
+      const teacher = filteredTeachers.find(t => t.id === teacherId);
+
+      if (teacher) {
+        const currentAvailability = teacher.availability || [];
+        let newAvailability;
+
+        if (dragMode === 'add') {
+          newAvailability = currentAvailability.includes(timeSlotId)
+            ? currentAvailability
+            : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
+        } else {
+          newAvailability = currentAvailability.filter(id => id !== timeSlotId);
+        }
+
+        if (JSON.stringify(currentAvailability.sort()) !== JSON.stringify(newAvailability.sort())) {
+          updates.push({
+            teacher,
+            newAvailability
+          });
+        }
+      }
+    }
+
+    // Apply all updates
+    for (const update of updates) {
+      await updateAvailabilityMutation.mutateAsync({
+        id: update.teacher.id,
+        data: {
+          name: update.teacher.name,
+          availability: update.newAvailability,
+          color_keyword: update.teacher.color_keyword,
+        },
+      });
+    }
+
+    setSelectedCells(new Set());
+    setDragStart(null);
+    setDragEnd(null);
+    setDragMode(null);
+  };
+
+  // Check if a cell is in the current drag selection
+  const isCellSelected = (teacherId, timeSlotId) => {
+    return selectedCells.has(getCellKey(teacherId, timeSlotId));
+  };
+
+  // Global mouseup handler to end drag selection when mouse leaves table
+  useEffect(() => {
+    const handleGlobalMouseUp = async () => {
+      if (isDragging) {
+        setIsDragging(false);
+
+        // Apply changes to all selected cells
+        const updates = [];
+        for (const cellKey of selectedCells) {
+          const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
+          const teacherId = parseInt(teacherIdStr);
+          const timeSlotId = parseInt(timeSlotIdStr);
+          const teacher = filteredTeachers.find(t => t.id === teacherId);
+
+          if (teacher) {
+            const currentAvailability = teacher.availability || [];
+            let newAvailability;
+
+            if (dragMode === 'add') {
+              newAvailability = currentAvailability.includes(timeSlotId)
+                ? currentAvailability
+                : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
+            } else {
+              newAvailability = currentAvailability.filter(id => id !== timeSlotId);
+            }
+
+            if (JSON.stringify([...currentAvailability].sort()) !== JSON.stringify([...newAvailability].sort())) {
+              updates.push({
+                teacher,
+                newAvailability
+              });
+            }
+          }
+        }
+
+        // Apply all updates
+        for (const update of updates) {
+          try {
+            await updateAvailabilityMutation.mutateAsync({
+              id: update.teacher.id,
+              data: {
+                name: update.teacher.name,
+                availability: update.newAvailability,
+                color_keyword: update.teacher.color_keyword,
+              },
+            });
+          } catch (error) {
+            console.error('Failed to update:', error);
+          }
+        }
+
+        setSelectedCells(new Set());
+        setDragStart(null);
+        setDragEnd(null);
+        setDragMode(null);
+      }
+    };
+
+    document.addEventListener('mouseup', handleGlobalMouseUp);
+    return () => document.removeEventListener('mouseup', handleGlobalMouseUp);
+  }, [isDragging, selectedCells, dragMode, filteredTeachers]);
 
   // Delete mutation
   const deleteMutation = useMutation({
@@ -447,6 +742,62 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
           />
         </div>
 
+        {/* Quick Actions Toolbar */}
+        {!isAllWeekMode && (
+          <div className="mb-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Preset Templates */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Apply to selected teacher:</span>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const preset = presetTemplates.find(p => p.name === e.target.value);
+                    if (preset && editingTeacher) {
+                      applyPresetToTeacher(editingTeacher, preset.ids);
+                    } else if (preset) {
+                      alert('Click on a teacher name first to select them, then choose a preset.');
+                    }
+                    e.target.value = '';
+                  }}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select Preset...</option>
+                  {presetTemplates.map(preset => (
+                    <option key={preset.name} value={preset.name}>{preset.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Copy From Teacher */}
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-700">Copy schedule from:</span>
+                <select
+                  value={copyFromTeacherId}
+                  onChange={(e) => setCopyFromTeacherId(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-[200px]"
+                >
+                  <option value="">Select source teacher...</option>
+                  {filteredTeachers.map(teacher => (
+                    <option key={teacher.id} value={teacher.id}>{teacher.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Usage Tips */}
+            <div className="mt-3 text-xs text-gray-500 space-y-1">
+              <p><strong>Tips for faster editing:</strong></p>
+              <ul className="list-disc list-inside ml-2 space-y-0.5">
+                <li><strong>Drag to select:</strong> Click and drag across multiple cells to select a range, then release to toggle them all</li>
+                <li><strong>Column toggle:</strong> Click a time slot header to toggle that slot for ALL teachers</li>
+                <li><strong>Row toggle:</strong> Right-click a teacher name to toggle all their time slots</li>
+                <li><strong>Copy schedule:</strong> Select a source teacher above, then click "Copy" button next to any teacher</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
         {/* Teachers Grid */}
         <div className="overflow-x-auto max-h-[calc(100vh-400px)] overflow-y-auto">
           <table className="w-full border-collapse">
@@ -458,10 +809,17 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                 {timeSlots?.map((slot, index) => {
                   // Determine background color based on position
                   const bgColor = Math.floor(index / 2) % 2 === 0 ? 'bg-gray-200' : 'bg-gray-300';
+                  const isClickable = !isAllWeekMode;
 
                   return (
-                    <th key={slot.id} className={`border border-gray-300 px-2 py-3 text-center text-xs font-semibold text-gray-900 min-w-[80px] sticky top-0 z-10 ${bgColor}`}>
+                    <th
+                      key={slot.id}
+                      className={`border border-gray-300 px-2 py-3 text-center text-xs font-semibold text-gray-900 min-w-[80px] sticky top-0 z-10 ${bgColor} ${isClickable ? 'cursor-pointer hover:bg-blue-200 transition-colors' : ''}`}
+                      onClick={() => isClickable && handleToggleColumn(slot.id)}
+                      title={isClickable ? `Click to toggle ${slot.name} for all teachers` : ''}
+                    >
                       {slot.name.replace(' to ', '-')}
+                      {isClickable && <div className="text-[9px] text-gray-500 font-normal">click to toggle</div>}
                     </th>
                   );
                 })}
@@ -499,9 +857,20 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                       <td
                         className="border border-gray-300 px-4 py-3 text-sm font-medium text-gray-900 sticky left-0 bg-white hover:bg-blue-100 z-10 cursor-pointer"
                         onClick={() => handleEdit(teacher)}
-                        title="Click to edit teacher"
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          if (!isAllWeekMode) {
+                            handleToggleRow(teacher);
+                          }
+                        }}
+                        title={isAllWeekMode ? "Click to edit teacher" : "Click to edit | Right-click to toggle all slots"}
                       >
-                        {teacher.name}
+                        <div className="flex items-center gap-2">
+                          <span>{teacher.name}</span>
+                          {!isAllWeekMode && (
+                            <span className="text-[9px] text-gray-400">(R-click: toggle all)</span>
+                          )}
+                        </div>
                       </td>
                       {timeSlots?.map((slot, index) => {
                         // Determine background color based on position
@@ -594,11 +963,12 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                         // Single day mode - original logic
                         const isAvailable = teacher.availability?.includes(slot.id);
                         const classInfo = getTeacherClassInfo(teacher.name, slot.id);
+                        const isSelected = isCellSelected(teacher.id, slot.id);
 
                         // Determine cell styling based on availability and class assignment
                         let cellStyle = { backgroundColor: bgColor };
                         let cellContent = null;
-                        let titleText = 'Not available - Click to add';
+                        let titleText = 'Not available - Click/drag to add';
 
                         if (classInfo.hasClass) {
                           // Teacher has a class - show with bright red background
@@ -619,31 +989,80 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                             color: 'white'
                           };
                           cellContent = (
-                            <div className="text-white text-xs font-bold">Available</div>
+                            <div className="text-white text-xs font-bold">✓</div>
                           );
-                          titleText = 'Available - Click to remove';
+                          titleText = 'Available - Click/drag to remove';
+                        }
+
+                        // Add selection highlight
+                        if (isSelected) {
+                          cellStyle = {
+                            ...cellStyle,
+                            outline: '3px solid #3b82f6',
+                            outlineOffset: '-2px',
+                            backgroundColor: dragMode === 'add' ? '#bfdbfe' : '#fecaca'
+                          };
                         }
 
                         return (
                           <td
                             key={slot.id}
-                            className="px-2 py-1 text-center border border-gray-300 cursor-pointer"
+                            className="px-2 py-1 text-center border border-gray-300 cursor-pointer select-none transition-all"
                             style={cellStyle}
-                            onClick={() => handleToggleAvailability(teacher, slot.id)}
+                            onMouseDown={(e) => handleDragStart(teacher, slot.id, e)}
+                            onMouseEnter={() => handleDragEnter(teacher, slot.id)}
+                            onMouseUp={handleDragEnd}
                             title={titleText}
                           >
                             {cellContent}
                           </td>
                         );
                       })}
-                      <td className="border border-gray-300 px-4 py-3 text-center sticky right-0 bg-white hover:bg-gray-50 z-10">
-                        <button
-                          onClick={() => handleDelete(teacher)}
-                          disabled={deleteMutation.isPending}
-                          className="px-3 py-1 text-sm text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
-                        >
-                          Delete
-                        </button>
+                      <td className="border border-gray-300 px-2 py-2 text-center sticky right-0 bg-white hover:bg-gray-50 z-10 min-w-[200px]">
+                        <div className="flex flex-col gap-1">
+                          {/* Quick Actions Row */}
+                          {!isAllWeekMode && (
+                            <div className="flex items-center justify-center gap-1">
+                              {/* Preset Dropdown */}
+                              <select
+                                className="px-1 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                value=""
+                                onChange={(e) => {
+                                  const preset = presetTemplates.find(p => p.name === e.target.value);
+                                  if (preset) {
+                                    applyPresetToTeacher(teacher, preset.ids);
+                                  }
+                                  e.target.value = '';
+                                }}
+                              >
+                                <option value="">Preset...</option>
+                                {presetTemplates.map(preset => (
+                                  <option key={preset.name} value={preset.name}>{preset.name}</option>
+                                ))}
+                              </select>
+
+                              {/* Copy Button */}
+                              {copyFromTeacherId && copyFromTeacherId !== String(teacher.id) && (
+                                <button
+                                  onClick={() => handleCopyFromTeacher(teacher, copyFromTeacherId)}
+                                  className="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                                  title={`Copy schedule from ${teachers.find(t => t.id === parseInt(copyFromTeacherId))?.name || 'selected teacher'}`}
+                                >
+                                  Copy
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Delete Button */}
+                          <button
+                            onClick={() => handleDelete(teacher)}
+                            disabled={deleteMutation.isPending}
+                            className="px-3 py-1 text-xs text-red-600 hover:text-red-800 font-medium disabled:opacity-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
