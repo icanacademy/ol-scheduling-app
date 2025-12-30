@@ -492,58 +492,73 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   // Global mouseup handler to end drag selection when mouse leaves table
   useEffect(() => {
     const handleGlobalMouseUp = async () => {
-      if (isDragging) {
-        setIsDragging(false);
+      if (!isDragging || selectedCells.size === 0) return;
 
-        // Apply changes to all selected cells
-        const updates = [];
-        for (const cellKey of selectedCells) {
-          const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
-          const teacherId = parseInt(teacherIdStr);
-          const timeSlotId = parseInt(timeSlotIdStr);
-          const teacher = filteredTeachers.find(t => t.id === teacherId);
+      setIsDragging(false);
+      const cellsToProcess = new Set(selectedCells);
+      const currentDragMode = dragMode;
 
-          if (teacher) {
-            const currentAvailability = teacher.availability || [];
-            let newAvailability;
+      // Clear UI state immediately for responsiveness
+      setSelectedCells(new Set());
+      setDragStart(null);
+      setDragEnd(null);
+      setDragMode(null);
 
-            if (dragMode === 'add') {
-              newAvailability = currentAvailability.includes(timeSlotId)
-                ? currentAvailability
-                : [...currentAvailability, timeSlotId].sort((a, b) => a - b);
-            } else {
-              newAvailability = currentAvailability.filter(id => id !== timeSlotId);
+      // Group selected cells by teacher
+      const teacherChanges = new Map();
+      for (const cellKey of cellsToProcess) {
+        const [teacherIdStr, timeSlotIdStr] = cellKey.split('-');
+        const teacherId = parseInt(teacherIdStr);
+        const timeSlotId = parseInt(timeSlotIdStr);
+
+        if (!teacherChanges.has(teacherId)) {
+          teacherChanges.set(teacherId, new Set());
+        }
+        teacherChanges.get(teacherId).add(timeSlotId);
+      }
+
+      // Process each teacher's changes
+      const updatePromises = [];
+      for (const [teacherId, timeSlotIds] of teacherChanges) {
+        const teacher = filteredTeachers.find(t => t.id === teacherId);
+        if (!teacher) continue;
+
+        let newAvailability = [...(teacher.availability || [])];
+
+        for (const timeSlotId of timeSlotIds) {
+          if (currentDragMode === 'add') {
+            if (!newAvailability.includes(timeSlotId)) {
+              newAvailability.push(timeSlotId);
             }
-
-            if (JSON.stringify([...currentAvailability].sort()) !== JSON.stringify([...newAvailability].sort())) {
-              updates.push({
-                teacher,
-                newAvailability
-              });
-            }
+          } else {
+            newAvailability = newAvailability.filter(id => id !== timeSlotId);
           }
         }
 
-        // Apply all updates
-        for (const update of updates) {
-          try {
-            await updateAvailabilityMutation.mutateAsync({
-              id: update.teacher.id,
+        // Sort the availability array
+        newAvailability.sort((a, b) => a - b);
+
+        // Only update if there's an actual change
+        const originalSorted = [...(teacher.availability || [])].sort((a, b) => a - b);
+        if (JSON.stringify(originalSorted) !== JSON.stringify(newAvailability)) {
+          updatePromises.push(
+            updateAvailabilityMutation.mutateAsync({
+              id: teacher.id,
               data: {
-                name: update.teacher.name,
-                availability: update.newAvailability,
-                color_keyword: update.teacher.color_keyword,
+                name: teacher.name,
+                availability: newAvailability,
+                color_keyword: teacher.color_keyword,
               },
-            });
-          } catch (error) {
-            console.error('Failed to update:', error);
-          }
+            }).catch(error => {
+              console.error('Failed to update teacher:', teacher.name, error);
+            })
+          );
         }
+      }
 
-        setSelectedCells(new Set());
-        setDragStart(null);
-        setDragEnd(null);
-        setDragMode(null);
+      // Wait for all updates to complete
+      if (updatePromises.length > 0) {
+        await Promise.all(updatePromises);
       }
     };
 
