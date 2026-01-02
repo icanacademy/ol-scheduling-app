@@ -228,6 +228,9 @@ function StudentDirectoryPage() {
                   Status <SortIcon field="status" />
                 </th>
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
+                  Subjects
+                </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
                   Class Days
                 </th>
                 <th
@@ -307,6 +310,11 @@ function StudentDirectoryPage() {
                         <option key={status} value={status}>{status}</option>
                       ))}
                     </select>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600">
+                    {student.subjects && Array.isArray(student.subjects) && student.subjects.length > 0
+                      ? student.subjects.join(', ')
+                      : '-'}
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {formatScheduleDays(student.schedule_days)}

@@ -38,6 +38,7 @@ class Student {
          s.grade,
          s.country,
          s.status,
+         s.subjects,
          s.program_start_date,
          s.program_end_date,
          s.schedule_days,
