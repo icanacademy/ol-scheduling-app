@@ -85,4 +85,13 @@ export const deleteChangeHistory = (id) => api.delete(`/student-change-history/$
 export const sendChatMessage = (message, conversationHistory = []) =>
   api.post('/chat', { message, conversationHistory });
 
+// Notes / To-Do
+export const getNotes = (status) => api.get('/notes', { params: status ? { status } : {} });
+export const getNoteCounts = () => api.get('/notes/counts');
+export const getNoteById = (id) => api.get(`/notes/${id}`);
+export const createNote = (data) => api.post('/notes', data);
+export const updateNote = (id, data) => api.put(`/notes/${id}`, data);
+export const toggleNoteStatus = (id) => api.patch(`/notes/${id}/toggle`);
+export const deleteNote = (id) => api.delete(`/notes/${id}`);
+
 export default api;

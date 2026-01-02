@@ -19,6 +19,7 @@ import backupRoutes from './routes/backups.js';
 import weeklyRoutes from './routes/weekly.js';
 import studentChangeHistoryRoutes from './routes/studentChangeHistory.js';
 import chatRoutes from './routes/chat.js';
+import noteRoutes from './routes/notes.js';
 
 dotenv.config();
 
@@ -59,6 +60,7 @@ app.use('/api/backups', backupRoutes);
 app.use('/api/weekly', weeklyRoutes);
 app.use('/api/student-change-history', studentChangeHistoryRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/notes', noteRoutes);
 
 // Serve static frontend files
 const clientDistPath = path.join(__dirname, '../../client/dist');
