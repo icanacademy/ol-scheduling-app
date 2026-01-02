@@ -233,6 +233,9 @@ function StudentDirectoryPage() {
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
                   Class Days
                 </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
+                  Class Times
+                </th>
                 <th
                   onClick={() => handleSort('program_start_date')}
                   className="px-4 py-3 text-left text-sm font-semibold text-gray-600 cursor-pointer hover:bg-gray-100"
@@ -318,6 +321,11 @@ function StudentDirectoryPage() {
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {formatScheduleDays(student.schedule_days)}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 text-sm">
+                    {student.class_times && Array.isArray(student.class_times) && student.class_times.length > 0
+                      ? student.class_times.slice(0, 3).join(', ') + (student.class_times.length > 3 ? '...' : '')
+                      : '-'}
                   </td>
                   <td className="px-4 py-3 text-gray-600">
                     {formatDate(student.program_start_date)}

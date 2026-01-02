@@ -30,7 +30,17 @@ class Student {
   // Get all students for directory with their assignments info
   static async getDirectory() {
     const result = await pool.query(
-      `SELECT DISTINCT ON (LOWER(s.name))
+      `WITH student_schedules AS (
+         SELECT
+           ast.student_id,
+           array_agg(DISTINCT EXTRACT(DOW FROM a.date)::int ORDER BY EXTRACT(DOW FROM a.date)::int) as class_days,
+           array_agg(DISTINCT ts.name ORDER BY ts.name) as class_times
+         FROM assignment_students ast
+         JOIN assignments a ON ast.assignment_id = a.id AND a.is_active = true
+         JOIN time_slots ts ON a.time_slot_id = ts.id
+         GROUP BY ast.student_id
+       )
+       SELECT DISTINCT ON (LOWER(s.name))
          s.id,
          s.name,
          s.english_name,
@@ -41,12 +51,14 @@ class Student {
          s.subjects,
          s.program_start_date,
          s.program_end_date,
-         s.schedule_days,
+         COALESCE(ss.class_days, s.schedule_days, '{}') as schedule_days,
+         COALESCE(ss.class_times, '{}') as class_times,
          s.schedule_pattern,
          s.student_type,
          s.created_at,
          s.updated_at
        FROM students s
+       LEFT JOIN student_schedules ss ON s.id = ss.student_id
        WHERE s.is_active = true
        ORDER BY LOWER(s.name),
                 (CASE WHEN s.first_start_date IS NOT NULL THEN 0 ELSE 1 END),
