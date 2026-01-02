@@ -54,7 +54,7 @@ function StudentDirectoryPage() {
       const matchesSearch =
         student.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         student.english_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        student.korean_name?.toLowerCase().includes(searchTerm.toLowerCase());
+        student.korean_name?.includes(searchTerm);
       const matchesStatus = statusFilter === 'all' || student.status === statusFilter;
       const matchesGrade = gradeFilter === 'all' || student.grade === gradeFilter;
       return matchesSearch && matchesStatus && matchesGrade;
@@ -253,8 +253,11 @@ function StudentDirectoryPage() {
                   <td className="px-4 py-3">
                     <div>
                       <div className="font-medium text-gray-900">{student.name}</div>
-                      {student.english_name && student.english_name !== student.name && (
-                        <div className="text-sm text-gray-500">{student.english_name}</div>
+                      {student.korean_name && (
+                        <div className="text-sm text-gray-500">{student.korean_name}</div>
+                      )}
+                      {student.english_name && student.english_name !== student.name && student.english_name !== student.korean_name && (
+                        <div className="text-sm text-gray-400">{student.english_name}</div>
                       )}
                     </div>
                   </td>
