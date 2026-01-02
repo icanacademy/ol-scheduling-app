@@ -137,3 +137,43 @@ export const deleteAllStudents = async (req, res) => {
     res.status(500).json({ error: 'Failed to delete all students', message: error.message });
   }
 };
+
+// Get student directory (all unique students with summary info)
+export const getStudentDirectory = async (req, res) => {
+  try {
+    const students = await Student.getDirectory();
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch student directory', message: error.message });
+  }
+};
+
+// Update student status
+export const updateStudentStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+    const student = await Student.updateStatus(req.params.id, status);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    res.json(student);
+  } catch (error) {
+    res.status(400).json({ error: 'Failed to update student status', message: error.message });
+  }
+};
+
+// Update student directory fields
+export const updateStudentDirectoryFields = async (req, res) => {
+  try {
+    const student = await Student.updateDirectoryFields(req.params.id, req.body);
+    if (!student) {
+      return res.status(404).json({ error: 'Student not found' });
+    }
+    res.json(student);
+  } catch (error) {
+    res.status(400).json({ error: 'Failed to update student', message: error.message });
+  }
+};

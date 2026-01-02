@@ -23,9 +23,12 @@ export const deleteAllTeachers = (date) => api.delete('/teachers/all', { data: {
 // Students
 export const getStudents = (date) => api.get('/students', { params: { date } });
 export const getAllUniqueStudents = () => api.get('/students/all-unique');
+export const getStudentDirectory = () => api.get('/students/directory');
 export const getStudentById = (id) => api.get(`/students/${id}`);
 export const createStudent = (data) => api.post('/students', data);
 export const updateStudent = (id, data) => api.put(`/students/${id}`, data);
+export const updateStudentStatus = (id, status) => api.patch(`/students/${id}/status`, { status });
+export const updateStudentDirectoryFields = (id, data) => api.patch(`/students/${id}/directory`, data);
 export const deleteStudent = (id) => api.delete(`/students/${id}`);
 export const deleteAllStudents = (date) => api.delete('/students/all', { data: { date } });
 

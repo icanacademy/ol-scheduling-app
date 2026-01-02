@@ -20,11 +20,70 @@ class Student {
       `SELECT DISTINCT ON (LOWER(name)) *
        FROM students
        WHERE is_active = true
-       ORDER BY LOWER(name), 
-                (CASE WHEN first_start_date IS NOT NULL THEN 0 ELSE 1 END), 
+       ORDER BY LOWER(name),
+                (CASE WHEN first_start_date IS NOT NULL THEN 0 ELSE 1 END),
                 id ASC`
     );
     return result.rows;
+  }
+
+  // Get all students for directory with their assignments info
+  static async getDirectory() {
+    const result = await pool.query(
+      `SELECT DISTINCT ON (LOWER(s.name))
+         s.id,
+         s.name,
+         s.english_name,
+         s.korean_name,
+         s.grade,
+         s.country,
+         s.status,
+         s.program_start_date,
+         s.program_end_date,
+         s.schedule_days,
+         s.schedule_pattern,
+         s.student_type,
+         s.created_at,
+         s.updated_at
+       FROM students s
+       WHERE s.is_active = true
+       ORDER BY LOWER(s.name),
+                (CASE WHEN s.first_start_date IS NOT NULL THEN 0 ELSE 1 END),
+                s.id ASC`
+    );
+    return result.rows;
+  }
+
+  // Update student status
+  static async updateStatus(id, status) {
+    const result = await pool.query(
+      `UPDATE students
+       SET status = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND is_active = true
+       RETURNING *`,
+      [status, id]
+    );
+    return result.rows[0];
+  }
+
+  // Update student directory fields (country, status, etc.)
+  static async updateDirectoryFields(id, data) {
+    const { country, status, grade, program_start_date, program_end_date, schedule_days } = data;
+
+    const result = await pool.query(
+      `UPDATE students
+       SET country = COALESCE($1, country),
+           status = COALESCE($2, status),
+           grade = COALESCE($3, grade),
+           program_start_date = COALESCE($4, program_start_date),
+           program_end_date = COALESCE($5, program_end_date),
+           schedule_days = COALESCE($6, schedule_days),
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $7 AND is_active = true
+       RETURNING *`,
+      [country, status, grade, program_start_date, program_end_date, schedule_days ? JSON.stringify(schedule_days) : null, id]
+    );
+    return result.rows[0];
   }
 
   // Find student by name and date (including inactive students)
