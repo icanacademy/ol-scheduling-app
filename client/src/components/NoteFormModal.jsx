@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { createNote, updateNote } from '../services/api';
 
-function NoteFormModal({ isOpen, onClose, onSave, note }) {
+function NoteFormModal({ isOpen, onClose, onSave, note, selectedDate }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [priority, setPriority] = useState('normal');
@@ -63,6 +63,7 @@ function NoteFormModal({ isOpen, onClose, onSave, note }) {
       title: title.trim(),
       description: description.trim() || null,
       priority,
+      date: selectedDate,
     };
 
     if (note) {

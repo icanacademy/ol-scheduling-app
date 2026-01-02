@@ -86,7 +86,7 @@ export const sendChatMessage = (message, conversationHistory = []) =>
   api.post('/chat', { message, conversationHistory });
 
 // Notes / To-Do
-export const getNotes = (status) => api.get('/notes', { params: status ? { status } : {} });
+export const getNotes = (date, status) => api.get('/notes', { params: { date, ...(status ? { status } : {}) } });
 export const getNoteCounts = () => api.get('/notes/counts');
 export const getNoteById = (id) => api.get(`/notes/${id}`);
 export const createNote = (data) => api.post('/notes', data);

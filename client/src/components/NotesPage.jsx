@@ -3,21 +3,22 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getNotes, toggleNoteStatus, deleteNote } from '../services/api';
 import NoteFormModal from './NoteFormModal';
 
-function NotesPage() {
+function NotesPage({ selectedDate }) {
   const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState(null);
   const [statusFilter, setStatusFilter] = useState('all'); // 'all', 'open', 'completed'
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Fetch notes
+  // Fetch notes for the selected date
   const { data: notes = [], isLoading } = useQuery({
-    queryKey: ['notes', statusFilter],
+    queryKey: ['notes', selectedDate, statusFilter],
     queryFn: async () => {
       const status = statusFilter === 'all' ? null : statusFilter;
-      const response = await getNotes(status);
+      const response = await getNotes(selectedDate, status);
       return response.data;
     },
+    enabled: !!selectedDate,
   });
 
   // Toggle status mutation
@@ -102,7 +103,7 @@ function NotesPage() {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Notes & To-Do</h2>
           <p className="text-gray-500 text-sm mt-1">
-            Track schedule changes, reminders, and tasks
+            {selectedDate ? `Notes for ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}` : 'Track schedule changes, reminders, and tasks'}
           </p>
         </div>
         <button
@@ -259,6 +260,7 @@ function NotesPage() {
         onClose={handleModalClose}
         onSave={handleModalSave}
         note={editingNote}
+        selectedDate={selectedDate}
       />
     </div>
   );

@@ -152,7 +152,7 @@ function App() {
           {activeTab === 'student-report' && <DayWrapper selectedDay={selectedDay} Component={StudentPrintPage} />}
           {activeTab === 'teacher-report' && <DayWrapper selectedDay={selectedDay} Component={TeacherPrintPage} />}
           {activeTab === 'backups' && <BackupRestorePage />}
-          {activeTab === 'notes' && <NotesPage />}
+          {activeTab === 'notes' && <DayWrapper selectedDay={selectedDay} Component={NotesPage} />}
         </main>
 
         {/* AI Chat Assistant */}

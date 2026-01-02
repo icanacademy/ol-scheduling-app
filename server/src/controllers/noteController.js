@@ -3,8 +3,8 @@ import Note from '../models/Note.js';
 // Get all notes
 export const getAllNotes = async (req, res) => {
   try {
-    const { status } = req.query;
-    const notes = await Note.getAll(status);
+    const { status, date } = req.query;
+    const notes = await Note.getAll(status, date);
     res.json(notes);
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch notes', message: error.message });
