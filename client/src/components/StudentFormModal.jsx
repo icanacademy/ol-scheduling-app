@@ -4,6 +4,7 @@ import { createStudent, updateStudent } from '../services/api';
 
 function StudentFormModal({ isOpen, onClose, onSave, student, selectedDate }) {
   const [name, setName] = useState('');
+  const [koreanName, setKoreanName] = useState('');
   const [grade, setGrade] = useState('');
   const [colorKeyword, setColorKeyword] = useState('');
   const [firstStartDate, setFirstStartDate] = useState('');
@@ -12,11 +13,13 @@ function StudentFormModal({ isOpen, onClose, onSave, student, selectedDate }) {
   useEffect(() => {
     if (student) {
       setName(student.name);
+      setKoreanName(student.korean_name || '');
       setGrade(student.grade || '');
       setColorKeyword(student.color_keyword || 'blue');
       setFirstStartDate(student.first_start_date || '');
     } else {
       setName('');
+      setKoreanName('');
       setGrade('');
       setColorKeyword('blue');
       setFirstStartDate('');
@@ -58,6 +61,7 @@ function StudentFormModal({ isOpen, onClose, onSave, student, selectedDate }) {
 
     const data = {
       name: name.trim(),
+      korean_name: koreanName.trim() || null,
       grade: grade.trim() || null,
       english_name: null,
       color_keyword: colorKeyword || null,
@@ -124,6 +128,21 @@ function StudentFormModal({ isOpen, onClose, onSave, student, selectedDate }) {
             {errors.name && (
               <p className="mt-1 text-sm text-red-600">{errors.name}</p>
             )}
+          </div>
+
+          {/* Korean Name */}
+          <div>
+            <label htmlFor="koreanName" className="block text-sm font-semibold mb-2">
+              Korean Name
+            </label>
+            <input
+              id="koreanName"
+              type="text"
+              value={koreanName}
+              onChange={(e) => setKoreanName(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Enter Korean name"
+            />
           </div>
 
           {/* Grade Level */}

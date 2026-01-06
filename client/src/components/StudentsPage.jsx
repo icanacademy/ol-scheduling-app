@@ -223,6 +223,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
           data: {
             name: student.name,
             english_name: student.english_name,
+            korean_name: student.korean_name,
             availability: newAvailability,
             color_keyword: student.color_keyword,
             weakness_level: student.weakness_level,
@@ -250,6 +251,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
         const updateData = {
           name: student.name,
           english_name: student.english_name,
+          korean_name: student.korean_name,
           availability: newAvailability,
           color_keyword: student.color_keyword,
           weakness_level: student.weakness_level,
@@ -259,7 +261,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
           schedule_days: student.schedule_days,
           schedule_pattern: student.schedule_pattern,
         };
-        
+
         await updateAvailabilityMutation.mutateAsync({
           id: student.id,
           data: updateData,

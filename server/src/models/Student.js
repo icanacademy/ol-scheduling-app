@@ -150,8 +150,8 @@ class Student {
     const result = await pool.query(
       `UPDATE students
        SET name = COALESCE($1, name),
-           english_name = $2,
-           korean_name = $3,
+           english_name = COALESCE($2, english_name),
+           korean_name = COALESCE($3, korean_name),
            availability = COALESCE($4, availability),
            color_keyword = $5,
            weakness_level = $6,
@@ -376,8 +376,8 @@ class Student {
     const result = await pool.query(
       `UPDATE students
        SET name = COALESCE($1, name),
-           english_name = $2,
-           korean_name = $3,
+           english_name = COALESCE($2, english_name),
+           korean_name = COALESCE($3, korean_name),
            availability = COALESCE($4, availability),
            color_keyword = $5,
            weakness_level = $6,
