@@ -29,16 +29,14 @@ class Student {
 
   // Get all active students across all dates (allows duplicate names if they're different people)
   // Used by attendance app which needs to see all students including those with same names
-  // Deduplicates by notion_page_id (if available) or by name+korean_name combination
+  // Deduplicates by name+korean_name combination to identify unique individuals
   // This ensures: same person on different dates = 1 row, different people with same name = multiple rows
   static async getAllActive() {
     const result = await pool.query(
-      `SELECT DISTINCT ON (
-         COALESCE(notion_page_id, LOWER(name) || '::' || COALESCE(korean_name, ''))
-       ) *
+      `SELECT DISTINCT ON (LOWER(name), COALESCE(korean_name, '')) *
        FROM students
        WHERE is_active = true
-       ORDER BY COALESCE(notion_page_id, LOWER(name) || '::' || COALESCE(korean_name, '')),
+       ORDER BY LOWER(name), COALESCE(korean_name, ''),
                 (CASE WHEN first_start_date IS NOT NULL THEN 0 ELSE 1 END),
                 id ASC`
     );
