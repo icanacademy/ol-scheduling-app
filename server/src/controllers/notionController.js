@@ -333,12 +333,19 @@ export const previewStudentsFromNotion = async (req, res) => {
     const errors = [];
     let skippedCount = 0;
 
-    // Get all existing students with notion_page_id to check which ones are already imported
+    // Get all existing students to check which ones are already imported
     const allExistingStudents = await Student.getAllActive();
+
+    // Check by notion_page_id (for students imported with the new system)
     const existingNotionPageIds = new Set(
       allExistingStudents
         .filter(s => s.notion_page_id)
         .map(s => s.notion_page_id)
+    );
+
+    // Also check by name (for students imported before notion_page_id was added)
+    const existingNames = new Set(
+      allExistingStudents.map(s => s.name.toLowerCase().trim())
     );
 
     for (const page of allPages) {
@@ -372,8 +379,9 @@ export const previewStudentsFromNotion = async (req, res) => {
           continue;
         }
 
-        // Skip students who are already imported (check by Notion page ID)
-        if (existingNotionPageIds.has(page.id)) {
+        // Skip students who are already imported
+        // Check by Notion page ID first, then by name as fallback
+        if (existingNotionPageIds.has(page.id) || existingNames.has(name.toLowerCase().trim())) {
           skippedCount++;
           continue;
         }
