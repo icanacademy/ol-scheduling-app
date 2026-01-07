@@ -168,36 +168,30 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
       if (!student.selectedDays || student.selectedDays.length === 0) {
         continue; // Skip students with no selected days
       }
-      
-      // Import the student for each selected day, but check for duplicates first
+
+      // Import the student for each selected day
+      // Note: We no longer check for duplicate names - the backend handles this via notion_page_id
       for (const day of student.selectedDays) {
         const targetDate = dayToDate(day);
         if (targetDate) {
           try {
-            // Check if student already exists for this date
-            const existingStudents = await getStudents(targetDate);
-            const studentExists = existingStudents.data.some(existing => 
-              existing.name.toLowerCase() === student.name.toLowerCase()
-            );
-            
-            if (!studentExists) {
-              // Create a copy of student data for this specific day
-              // Map camelCase fields from Notion to snake_case for the API
-              const studentData = {
-                ...student,
-                date: targetDate,
-                korean_name: student.koreanName || '',
-                // Remove selectedDays and koreanName from the data sent to server
-                selectedDays: undefined,
-                koreanName: undefined
-              };
-              delete studentData.selectedDays;
-              delete studentData.koreanName;
+            // Create a copy of student data for this specific day
+            // Map camelCase fields from Notion to snake_case for the API
+            const studentData = {
+              ...student,
+              date: targetDate,
+              korean_name: student.koreanName || '',
+              notion_page_id: student.notionPageId || null,
+              // Remove selectedDays and koreanName from the data sent to server
+              selectedDays: undefined,
+              koreanName: undefined,
+              notionPageId: undefined
+            };
+            delete studentData.selectedDays;
+            delete studentData.koreanName;
+            delete studentData.notionPageId;
 
-              await createStudent(studentData);
-            } else {
-              console.log(`Student ${student.name} already exists for ${day}, skipping...`);
-            }
+            await createStudent(studentData);
           } catch (error) {
             console.error(`Failed to import ${student.name} for ${day}:`, error);
           }
@@ -314,20 +308,12 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     return 'need-teachers';
   };
 
-  // Filter students by search term and selected day with deduplication and sorting
+  // Filter students by search term and selected day with sorting
   const filteredStudents = useMemo(() => {
     if (!students) return [];
-    
-    // Create a map to deduplicate students by name
-    const uniqueStudents = new Map();
-    students.forEach(student => {
-      if (!uniqueStudents.has(student.name)) {
-        uniqueStudents.set(student.name, student);
-      }
-    });
-    
-    // Filter by search term and selected day
-    const filtered = Array.from(uniqueStudents.values()).filter((student) => {
+
+    // Filter by search term and selected day (no deduplication - allow same names)
+    const filtered = students.filter((student) => {
       // Search filter
       const matchesSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         student.english_name?.toLowerCase().includes(searchTerm.toLowerCase());
