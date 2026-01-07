@@ -333,9 +333,13 @@ export const previewStudentsFromNotion = async (req, res) => {
     const errors = [];
     let skippedCount = 0;
 
-    // Get existing students for this date
-    const existingStudents = await Student.getAll(date);
-    const existingNames = new Set(existingStudents.map(s => s.name.toLowerCase()));
+    // Get all existing students with notion_page_id to check which ones are already imported
+    const allExistingStudents = await Student.getAllActive();
+    const existingNotionPageIds = new Set(
+      allExistingStudents
+        .filter(s => s.notion_page_id)
+        .map(s => s.notion_page_id)
+    );
 
     for (const page of allPages) {
       try {
@@ -368,21 +372,20 @@ export const previewStudentsFromNotion = async (req, res) => {
           continue;
         }
 
-        // Check if student with same name already exists (but don't skip - allow duplicates)
-        const exists = existingNames.has(name.toLowerCase());
-        if (exists) {
+        // Skip students who are already imported (check by Notion page ID)
+        if (existingNotionPageIds.has(page.id)) {
           skippedCount++;
+          continue;
         }
 
-        // Include ALL students from Notion, including those with duplicate names
-        // Mark them with exists flag so UI can show a warning
+        // Only show students who are NOT already in the system
         students.push({
           name: name,
           koreanName: koreanName,
           grade: grade,
           preferredTime: preferredTime,
-          notionPageId: page.id, // Include Notion page ID for unique identification
-          exists: exists
+          notionPageId: page.id,
+          exists: false
         });
       } catch (error) {
         errors.push(error.message);
