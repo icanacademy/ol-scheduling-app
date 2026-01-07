@@ -27,6 +27,19 @@ class Student {
     return result.rows;
   }
 
+  // Get all active students across all dates (allows duplicate names)
+  // Used by attendance app which needs to see all students including those with same names
+  static async getAllActive() {
+    const result = await pool.query(
+      `SELECT DISTINCT ON (id) *
+       FROM students
+       WHERE is_active = true
+       ORDER BY id,
+                (CASE WHEN first_start_date IS NOT NULL THEN 0 ELSE 1 END)`
+    );
+    return result.rows;
+  }
+
   // Get all students for directory with their assignments info
   static async getDirectory() {
     const result = await pool.query(

@@ -2,6 +2,7 @@ import express from 'express';
 import {
   getAllStudents,
   getAllUniqueStudents,
+  getAllActiveStudents,
   getStudentById,
   getStudentsByColor,
   getAvailableStudents,
@@ -19,6 +20,7 @@ const router = express.Router();
 
 router.get('/', getAllStudents);
 router.get('/all-unique', getAllUniqueStudents);
+router.get('/all-active', getAllActiveStudents);
 router.get('/directory', getStudentDirectory);
 router.get('/by-color', getStudentsByColor);
 router.get('/available', getAvailableStudents);

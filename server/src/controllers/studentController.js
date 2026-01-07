@@ -23,6 +23,15 @@ export const getAllUniqueStudents = async (req, res) => {
   }
 };
 
+export const getAllActiveStudents = async (req, res) => {
+  try {
+    const students = await Student.getAllActive();
+    res.json(students);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch active students', message: error.message });
+  }
+};
+
 export const getStudentById = async (req, res) => {
   try {
     const student = await Student.getById(req.params.id);
