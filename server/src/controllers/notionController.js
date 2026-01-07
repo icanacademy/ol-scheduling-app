@@ -368,19 +368,21 @@ export const previewStudentsFromNotion = async (req, res) => {
           continue;
         }
 
-        // Skip students that already exist in the database for this date
+        // Check if student with same name already exists (but don't skip - allow duplicates)
         const exists = existingNames.has(name.toLowerCase());
         if (exists) {
           skippedCount++;
-          continue;
         }
 
+        // Include ALL students from Notion, including those with duplicate names
+        // Mark them with exists flag so UI can show a warning
         students.push({
           name: name,
           koreanName: koreanName,
           grade: grade,
           preferredTime: preferredTime,
-          exists: false
+          notionPageId: page.id, // Include Notion page ID for unique identification
+          exists: exists
         });
       } catch (error) {
         errors.push(error.message);
@@ -446,6 +448,9 @@ export const importStudentsFromNotion = async (req, res) => {
         const endTime = page.properties['End Time']?.select?.name || '';
         const preferredTime = page.properties['Preferred Time']?.rich_text?.[0]?.plain_text || '';
 
+        // Get the Notion page ID for unique identification
+        const notionPageId = page.id;
+
         if (!name) {
           continue;
         }
@@ -456,15 +461,16 @@ export const importStudentsFromNotion = async (req, res) => {
         // Determine schedule pattern based on time preferences
         let scheduleDays = []; // Empty by default - will be set manually
         let schedulePattern = 'Manual scheduling';
-        
+
         if (startTime && endTime) {
           schedulePattern = `${startTime} - ${endTime}`;
           // For now, leave scheduleDays empty until we add dedicated fields to Notion
           // Later we can add logic here to parse schedule days from Notion
         }
 
-        // Check if student already exists
-        const existingStudent = await Student.findByName(name, date);
+        // Check if student already exists by Notion page ID (NOT by name)
+        // This allows multiple students with the same name to be imported
+        const existingStudent = await Student.findByNotionPageId(notionPageId);
 
         const studentData = {
           name: name,
@@ -475,11 +481,13 @@ export const importStudentsFromNotion = async (req, res) => {
           date: date,
           teacher_notes: '',
           schedule_days: scheduleDays,
-          schedule_pattern: schedulePattern
+          schedule_pattern: schedulePattern,
+          notion_page_id: notionPageId
         };
 
         let student;
         if (existingStudent) {
+          // Update existing student (same Notion record imported before)
           student = await Student.reactivate(existingStudent.id, studentData);
           updatedStudents.push({
             name: name,
@@ -488,6 +496,7 @@ export const importStudentsFromNotion = async (req, res) => {
             slots: 0
           });
         } else {
+          // Create new student (new Notion record or first import)
           student = await Student.create(studentData);
           createdStudents.push({
             name: name,
@@ -498,7 +507,7 @@ export const importStudentsFromNotion = async (req, res) => {
         }
 
       } catch (error) {
-        const studentName = (page.properties['Full Name']?.title?.[0]?.plain_text || 
+        const studentName = (page.properties['Full Name']?.title?.[0]?.plain_text ||
                            page.properties['Student']?.title?.[0]?.plain_text ||
                            page.properties['English Name']?.rich_text?.[0]?.plain_text || 'Unknown').trim();
         errors.push(`${studentName}: ${error.message}`);

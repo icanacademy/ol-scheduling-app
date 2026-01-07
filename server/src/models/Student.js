@@ -111,6 +111,18 @@ class Student {
     return result.rows[0];
   }
 
+  // Find student by Notion page ID (for import deduplication)
+  static async findByNotionPageId(notionPageId) {
+    if (!notionPageId) {
+      return null;
+    }
+    const result = await pool.query(
+      'SELECT * FROM students WHERE notion_page_id = $1 LIMIT 1',
+      [notionPageId]
+    );
+    return result.rows[0];
+  }
+
   // Reactivate and update an existing student
   static async reactivate(id, data) {
     const {
@@ -287,7 +299,9 @@ class Student {
       gbwt_initial,
       reading_level_initial,
       // Interview
-      interview_score
+      interview_score,
+      // Notion tracking
+      notion_page_id
     } = data;
 
     if (!date) {
@@ -301,8 +315,8 @@ class Student {
         student_id, gender, grade, student_type,
         reading_score, grammar_score, listening_score, writing_score, level_test_total,
         wpm_initial, gbwt_initial, reading_level_initial,
-        interview_score, schedule_days, schedule_pattern)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+        interview_score, schedule_days, schedule_pattern, notion_page_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
        RETURNING *`,
       [
         name?.trim(),
@@ -331,7 +345,8 @@ class Student {
         reading_level_initial,
         interview_score,
         schedule_days ? JSON.stringify(schedule_days) : null,
-        schedule_pattern
+        schedule_pattern,
+        notion_page_id
       ]
     );
     return result.rows[0];
