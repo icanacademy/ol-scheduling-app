@@ -57,6 +57,16 @@ class Student {
          JOIN assignments a ON ast.assignment_id = a.id AND a.is_active = true
          JOIN time_slots ts ON a.time_slot_id = ts.id
          GROUP BY ast.student_id
+       ),
+       student_teachers AS (
+         SELECT
+           ast.student_id,
+           array_agg(DISTINCT t.name ORDER BY t.name) as teacher_names
+         FROM assignment_students ast
+         JOIN assignments a ON ast.assignment_id = a.id AND a.is_active = true
+         JOIN assignment_teachers ateach ON a.id = ateach.assignment_id
+         JOIN teachers t ON ateach.teacher_id = t.id AND t.is_active = true
+         GROUP BY ast.student_id
        )
        SELECT DISTINCT ON (LOWER(s.name))
          s.id,
@@ -71,12 +81,14 @@ class Student {
          s.program_end_date,
          COALESCE(ss.class_days, ARRAY[]::int[]) as schedule_days,
          COALESCE(ss.class_times, ARRAY[]::text[]) as class_times,
+         COALESCE(st.teacher_names, ARRAY[]::text[]) as assigned_teachers,
          s.schedule_pattern,
          s.student_type,
          s.created_at,
          s.updated_at
        FROM students s
        LEFT JOIN student_schedules ss ON s.id = ss.student_id
+       LEFT JOIN student_teachers st ON s.id = st.student_id
        WHERE s.is_active = true
        ORDER BY LOWER(s.name),
                 (CASE WHEN s.first_start_date IS NOT NULL THEN 0 ELSE 1 END),

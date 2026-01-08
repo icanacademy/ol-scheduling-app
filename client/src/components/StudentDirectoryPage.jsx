@@ -254,6 +254,9 @@ function StudentDirectoryPage() {
                 <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
                   Class Times
                 </th>
+                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-600">
+                  Teachers
+                </th>
                 <th
                   onClick={() => handleSort('program_start_date')}
                   className="px-4 py-3 text-left text-sm font-semibold text-gray-600 cursor-pointer hover:bg-gray-100"
@@ -343,6 +346,11 @@ function StudentDirectoryPage() {
                   <td className="px-4 py-3 text-gray-600 text-sm">
                     {student.class_times && Array.isArray(student.class_times) && student.class_times.length > 0
                       ? student.class_times.slice(0, 3).join(', ') + (student.class_times.length > 3 ? '...' : '')
+                      : '-'}
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 text-sm">
+                    {student.assigned_teachers && Array.isArray(student.assigned_teachers) && student.assigned_teachers.length > 0
+                      ? student.assigned_teachers.join(', ')
                       : '-'}
                   </td>
                   <td className="px-4 py-3 text-gray-600">
