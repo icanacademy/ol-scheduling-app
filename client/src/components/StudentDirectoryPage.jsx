@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getStudentDirectory, updateStudentStatus, updateStudentDirectoryFields } from '../services/api';
+import { getStudentDirectory, updateStudentStatus, updateStudentDirectoryFields, deleteStudent } from '../services/api';
 
 const STATUS_OPTIONS = ['New', 'Active', 'On Hold', 'Finished'];
 const STATUS_COLORS = {
@@ -44,6 +44,24 @@ function StudentDirectoryPage() {
       setEditingStudent(null);
     },
   });
+
+  // Delete mutation
+  const deleteMutation = useMutation({
+    mutationFn: deleteStudent,
+    onSuccess: () => {
+      queryClient.invalidateQueries(['student-directory']);
+      queryClient.invalidateQueries(['students']);
+    },
+  });
+
+  const handleDelete = (student) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${student.name}"?\n\nThis will remove the student from all dates and cannot be undone.`
+    );
+    if (confirmed) {
+      deleteMutation.mutate(student.id);
+    }
+  };
 
   // Get unique grades for filter
   const uniqueGrades = [...new Set(students.map(s => s.grade).filter(Boolean))].sort();
@@ -334,12 +352,21 @@ function StudentDirectoryPage() {
                     {formatDate(student.program_end_date)}
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => setEditingStudent(editingStudent === student.id ? null : student.id)}
-                      className="text-blue-600 hover:text-blue-800 text-sm"
-                    >
-                      {editingStudent === student.id ? 'Done' : 'Edit'}
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setEditingStudent(editingStudent === student.id ? null : student.id)}
+                        className="text-blue-600 hover:text-blue-800 text-sm"
+                      >
+                        {editingStudent === student.id ? 'Done' : 'Edit'}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(student)}
+                        disabled={deleteMutation.isPending}
+                        className="text-red-600 hover:text-red-800 text-sm disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
