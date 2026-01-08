@@ -459,6 +459,12 @@ export const importStudentsFromNotion = async (req, res) => {
         const endTime = page.properties['End Time']?.select?.name || '';
         const preferredTime = page.properties['Preferred Time']?.rich_text?.[0]?.plain_text || '';
 
+        // Get country from Notion (try different possible field types)
+        const country = page.properties['Country']?.select?.name ||
+                       page.properties['Country']?.rich_text?.[0]?.plain_text ||
+                       page.properties['Nationality']?.select?.name ||
+                       page.properties['Nationality']?.rich_text?.[0]?.plain_text || '';
+
         // Get the Notion page ID for unique identification
         const notionPageId = page.id;
 
@@ -487,6 +493,7 @@ export const importStudentsFromNotion = async (req, res) => {
           name: name,
           korean_name: koreanName,
           grade: grade,
+          country: country,
           availability: availability,
           color_keyword: 'blue',
           date: date,
@@ -621,6 +628,12 @@ export const getAllNotionStudents = async (req, res) => {
                        page.properties['Program Start Date']?.date?.start ||
                        page.properties['Start Date']?.rich_text?.[0]?.plain_text || '';
 
+      // Get country from Notion
+      const country = page.properties['Country']?.select?.name ||
+                     page.properties['Country']?.rich_text?.[0]?.plain_text ||
+                     page.properties['Nationality']?.select?.name ||
+                     page.properties['Nationality']?.rich_text?.[0]?.plain_text || '';
+
       return {
         notionId: page.id,
         name: (page.properties['Full Name']?.title?.[0]?.plain_text ||
@@ -633,7 +646,8 @@ export const getAllNotionStudents = async (req, res) => {
         grade: page.properties['Grade']?.rich_text?.[0]?.plain_text || '',
         studentId: studentId,
         gender: gender,
-        startDate: startDate
+        startDate: startDate,
+        country: country
       };
     });
 

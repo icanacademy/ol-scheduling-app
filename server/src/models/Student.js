@@ -175,6 +175,7 @@ class Student {
       gender,
       grade,
       student_type,
+      country,
       // Level test scores
       reading_score,
       grammar_score,
@@ -206,20 +207,21 @@ class Student {
            gender = $13,
            grade = $14,
            student_type = $15,
-           reading_score = $16,
-           grammar_score = $17,
-           listening_score = $18,
-           writing_score = $19,
-           level_test_total = $20,
-           wpm_initial = $21,
-           gbwt_initial = $22,
-           reading_level_initial = $23,
-           interview_score = $24,
-           schedule_days = COALESCE($25, schedule_days),
-           schedule_pattern = $26,
+           country = COALESCE($16, country),
+           reading_score = $17,
+           grammar_score = $18,
+           listening_score = $19,
+           writing_score = $20,
+           level_test_total = $21,
+           wpm_initial = $22,
+           gbwt_initial = $23,
+           reading_level_initial = $24,
+           interview_score = $25,
+           schedule_days = COALESCE($26, schedule_days),
+           schedule_pattern = $27,
            is_active = true,
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $27
+       WHERE id = $28
        RETURNING *`,
       [
         name?.trim(),
@@ -237,6 +239,7 @@ class Student {
         gender,
         grade,
         student_type,
+        country,
         reading_score,
         grammar_score,
         listening_score,
@@ -318,6 +321,7 @@ class Student {
       gender,
       grade,
       student_type,
+      country,
       // Level test scores
       reading_score,
       grammar_score,
@@ -342,11 +346,11 @@ class Student {
       `INSERT INTO students
        (name, english_name, korean_name, availability, color_keyword, weakness_level, teacher_notes, date, first_start_date,
         school, program_start_date, program_end_date,
-        student_id, gender, grade, student_type,
+        student_id, gender, grade, student_type, country,
         reading_score, grammar_score, listening_score, writing_score, level_test_total,
         wpm_initial, gbwt_initial, reading_level_initial,
         interview_score, schedule_days, schedule_pattern, notion_page_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29)
        RETURNING *`,
       [
         name?.trim(),
@@ -365,6 +369,7 @@ class Student {
         gender,
         grade,
         student_type,
+        country,
         reading_score,
         grammar_score,
         listening_score,
