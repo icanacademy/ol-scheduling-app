@@ -67,6 +67,14 @@ class Student {
          JOIN assignment_teachers ateach ON a.id = ateach.assignment_id
          JOIN teachers t ON ateach.teacher_id = t.id AND t.is_active = true
          GROUP BY ast.student_id
+       ),
+       student_subjects AS (
+         SELECT
+           ast.student_id,
+           array_agg(DISTINCT a.subject ORDER BY a.subject) FILTER (WHERE a.subject IS NOT NULL AND a.subject != '') as subject_names
+         FROM assignment_students ast
+         JOIN assignments a ON ast.assignment_id = a.id AND a.is_active = true
+         GROUP BY ast.student_id
        )
        SELECT DISTINCT ON (LOWER(s.name))
          s.id,
@@ -80,7 +88,7 @@ class Student {
            WHEN s.availability IS NULL OR s.availability = '[]'::jsonb THEN 'On Hold'
            ELSE s.status
          END as status,
-         s.subjects,
+         COALESCE(subj.subject_names, ARRAY[]::text[]) as subjects,
          s.program_start_date,
          s.program_end_date,
          COALESCE(ss.class_days, ARRAY[]::int[]) as schedule_days,
@@ -93,6 +101,7 @@ class Student {
        FROM students s
        LEFT JOIN student_schedules ss ON s.id = ss.student_id
        LEFT JOIN student_teachers st ON s.id = st.student_id
+       LEFT JOIN student_subjects subj ON s.id = subj.student_id
        WHERE s.is_active = true
        ORDER BY LOWER(s.name),
                 (CASE WHEN s.first_start_date IS NOT NULL THEN 0 ELSE 1 END),
