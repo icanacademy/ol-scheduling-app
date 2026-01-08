@@ -75,7 +75,7 @@ class Student {
          s.korean_name,
          s.grade,
          s.country,
-         s.status,
+         CASE WHEN s.status = 'Stopped' THEN 'On Hold' ELSE s.status END as status,
          s.subjects,
          s.program_start_date,
          s.program_end_date,
@@ -99,12 +99,14 @@ class Student {
 
   // Update student status
   static async updateStatus(id, status) {
+    // Map "On Hold" to "Stopped" for database storage (Students tab uses "Stopped")
+    const dbStatus = status === 'On Hold' ? 'Stopped' : status;
     const result = await pool.query(
       `UPDATE students
        SET status = $1, updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND is_active = true
        RETURNING *`,
-      [status, id]
+      [dbStatus, id]
     );
     return result.rows[0];
   }
@@ -112,6 +114,8 @@ class Student {
   // Update student directory fields (country, status, etc.)
   static async updateDirectoryFields(id, data) {
     const { country, status, grade, program_start_date, program_end_date, schedule_days } = data;
+    // Map "On Hold" to "Stopped" for database storage (Students tab uses "Stopped")
+    const dbStatus = status === 'On Hold' ? 'Stopped' : status;
 
     const result = await pool.query(
       `UPDATE students
@@ -124,7 +128,7 @@ class Student {
            updated_at = CURRENT_TIMESTAMP
        WHERE id = $7 AND is_active = true
        RETURNING *`,
-      [country, status, grade, program_start_date, program_end_date, schedule_days ? JSON.stringify(schedule_days) : null, id]
+      [country, dbStatus, grade, program_start_date, program_end_date, schedule_days ? JSON.stringify(schedule_days) : null, id]
     );
     return result.rows[0];
   }
