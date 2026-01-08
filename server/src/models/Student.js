@@ -75,7 +75,11 @@ class Student {
          s.korean_name,
          s.grade,
          s.country,
-         CASE WHEN s.status = 'Stopped' THEN 'On Hold' ELSE s.status END as status,
+         CASE
+           WHEN s.status = 'Stopped' THEN 'On Hold'
+           WHEN s.availability IS NULL OR s.availability = '[]'::jsonb THEN 'On Hold'
+           ELSE s.status
+         END as status,
          s.subjects,
          s.program_start_date,
          s.program_end_date,
