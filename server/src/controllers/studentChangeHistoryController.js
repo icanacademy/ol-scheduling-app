@@ -2,9 +2,12 @@ import StudentChangeHistory from '../models/StudentChangeHistory.js';
 
 export const createChangeHistory = async (req, res) => {
   try {
+    console.log('Creating change history with data:', JSON.stringify(req.body, null, 2));
     const changeHistory = await StudentChangeHistory.create(req.body);
     res.status(201).json(changeHistory);
   } catch (error) {
+    console.error('Failed to create change history:', error.message);
+    console.error('Request body was:', JSON.stringify(req.body, null, 2));
     res.status(400).json({ error: 'Failed to create change history', message: error.message });
   }
 };

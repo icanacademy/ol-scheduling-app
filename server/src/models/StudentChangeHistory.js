@@ -23,7 +23,7 @@ class StudentChangeHistory {
     } = data;
 
     const result = await pool.query(
-      `INSERT INTO student_change_history 
+      `INSERT INTO student_change_history
        (student_id, change_type, change_date, implementation_date, change_description,
         old_teacher_names, old_time_slot, old_days, old_subject,
         new_teacher_names, new_time_slot, new_days, new_subject,
@@ -31,13 +31,25 @@ class StudentChangeHistory {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
        RETURNING *`,
       [
-        student_id, change_type, change_date, implementation_date, change_description,
-        old_teacher_names, old_time_slot, old_days, old_subject,
-        new_teacher_names, new_time_slot, new_days, new_subject,
-        reason, notes, recorded_by
+        student_id,
+        change_type,
+        change_date,
+        implementation_date || null,
+        change_description || null,
+        old_teacher_names || null,
+        old_time_slot || null,
+        old_days || null,
+        old_subject || null,
+        new_teacher_names || null,
+        new_time_slot || null,
+        new_days || null,
+        new_subject || null,
+        reason || null,
+        notes || null,
+        recorded_by
       ]
     );
-    
+
     return result.rows[0];
   }
 

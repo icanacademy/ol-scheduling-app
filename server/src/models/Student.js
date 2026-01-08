@@ -470,15 +470,44 @@ class Student {
     return result.rows[0];
   }
 
-  // Soft delete a student
+  // Soft delete a student and all their records across all dates
   static async delete(id) {
-    const result = await pool.query(
-      `UPDATE students
-       SET is_active = false, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $1
-       RETURNING *`,
+    // First, get the student to find their identifying info
+    const student = await pool.query(
+      'SELECT id, name, korean_name, notion_page_id FROM students WHERE id = $1',
       [id]
     );
+
+    if (student.rows.length === 0) {
+      return null;
+    }
+
+    const { name, korean_name, notion_page_id } = student.rows[0];
+
+    // Delete all records for this student across all dates
+    // Use notion_page_id if available, otherwise match by name + korean_name
+    let result;
+    if (notion_page_id) {
+      result = await pool.query(
+        `UPDATE students
+         SET is_active = false, updated_at = CURRENT_TIMESTAMP
+         WHERE notion_page_id = $1 AND is_active = true
+         RETURNING *`,
+        [notion_page_id]
+      );
+    } else {
+      // Match by name and korean_name (handles case where korean_name might be null)
+      result = await pool.query(
+        `UPDATE students
+         SET is_active = false, updated_at = CURRENT_TIMESTAMP
+         WHERE LOWER(name) = LOWER($1)
+         AND (korean_name = $2 OR (korean_name IS NULL AND $2 IS NULL))
+         AND is_active = true
+         RETURNING *`,
+        [name, korean_name]
+      );
+    }
+
     return result.rows[0];
   }
 

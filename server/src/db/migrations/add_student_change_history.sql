@@ -4,7 +4,8 @@ CREATE TABLE IF NOT EXISTS student_change_history (
   student_id INTEGER NOT NULL REFERENCES students(id) ON DELETE CASCADE,
   change_type VARCHAR(50) NOT NULL, -- 'teacher_change', 'time_change', 'day_change', 'subject_change', 'other'
   change_date DATE NOT NULL,
-  change_description TEXT NOT NULL,
+  implementation_date DATE,
+  change_description TEXT,
   
   -- Old values
   old_teacher_names TEXT[], -- Array of teacher names

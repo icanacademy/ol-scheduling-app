@@ -80,6 +80,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     mutationFn: deleteStudent,
     onSuccess: () => {
       queryClient.invalidateQueries(['students']);
+      queryClient.invalidateQueries(['student-directory']);
     },
   });
 
@@ -89,6 +90,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     mutationFn: (date) => deleteAllStudents(date),
     onSuccess: (response) => {
       queryClient.invalidateQueries(['students']);
+      queryClient.invalidateQueries(['student-directory']);
       alert(response.data.message || 'Students deleted successfully!');
     },
     onError: (error) => {

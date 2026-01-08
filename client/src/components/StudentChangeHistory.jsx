@@ -43,7 +43,8 @@ function StudentChangeHistory({ student, isOpen, onClose }) {
       });
     },
     onError: (error) => {
-      alert('Failed to add change history: ' + error.message);
+      const errorMsg = error.response?.data?.message || error.message;
+      alert('Failed to add change history: ' + errorMsg);
     }
   });
 
@@ -64,10 +65,14 @@ function StudentChangeHistory({ student, isOpen, onClose }) {
       return;
     }
 
-    await createMutation.mutateAsync({
+    const payload = {
       ...newChange,
       student_id: student.id
-    });
+    };
+    console.log('Sending change history payload:', payload);
+    console.log('Student object:', student);
+
+    await createMutation.mutateAsync(payload);
   };
 
   const handleDelete = async (id, changeDescription) => {
