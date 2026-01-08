@@ -5,6 +5,7 @@ import { weekDays } from '../utils/dayMapping';
 function NotionImportModal({ isOpen, onClose, type, selectedDate, onPreview, onImport }) {
   const [previewData, setPreviewData] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasFetchedPreview, setHasFetchedPreview] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
   const [selectedDays, setSelectedDays] = useState({}); // Track selected days per student
 
@@ -20,8 +21,9 @@ function NotionImportModal({ isOpen, onClose, type, selectedDate, onPreview, onI
     try {
       const data = await onPreview(selectedDate);
       setPreviewData(data);
+      setHasFetchedPreview(true);
       setSelectedItems(data.map((_, index) => index)); // Select all by default
-      
+
       // Initialize all days selected for all students by default
       const initialDays = {};
       data.forEach((_, index) => {
@@ -180,6 +182,14 @@ function NotionImportModal({ isOpen, onClose, type, selectedDate, onPreview, onI
             </div>
           )}
         </div>
+
+        {previewData.length === 0 && hasFetchedPreview && !isLoading && (
+          <div className="text-center py-8 text-gray-500">
+            <p className="text-lg mb-2">No new {type} to import</p>
+            <p className="text-sm">All {type} from Notion are already in the system.</p>
+            <p className="text-sm mt-2">If you want to re-import deleted {type}, they need to be permanently removed first.</p>
+          </div>
+        )}
 
         {previewData.length > 0 && (
           <div className="flex-1 overflow-auto mb-4">
