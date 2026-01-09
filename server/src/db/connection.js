@@ -10,10 +10,17 @@ const { Pool } = pg;
 pg.types.setTypeParser(1082, (val) => val); // 1082 is the OID for DATE type
 
 // Support both DATABASE_URL (Render) and individual env vars (local)
+const isProduction = process.env.NODE_ENV === 'production';
+
 const poolConfig = process.env.DATABASE_URL
   ? {
       connectionString: process.env.DATABASE_URL,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+      ssl: isProduction ? { rejectUnauthorized: false } : false,
+      // Serverless optimizations
+      max: 5,                    // Fewer connections for serverless
+      min: 0,                    // Allow pool to be empty
+      idleTimeoutMillis: 10000,  // Close idle connections faster
+      connectionTimeoutMillis: 5000,  // Fail fast if can't connect
     }
   : {
       host: process.env.DB_HOST || 'localhost',

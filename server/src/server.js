@@ -31,21 +31,18 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Health check route
-app.get('/api/health', async (req, res) => {
+// Health check route - lightweight, no DB query
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Deep health check with DB (for monitoring)
+app.get('/api/health/db', async (req, res) => {
   try {
-    await pool.query('SELECT NOW()');
-    res.json({
-      status: 'ok',
-      message: 'Server and database are running',
-      timestamp: new Date().toISOString()
-    });
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'connected' });
   } catch (error) {
-    res.status(500).json({
-      status: 'error',
-      message: 'Database connection failed',
-      error: error.message
-    });
+    res.status(500).json({ status: 'error', message: error.message });
   }
 });
 

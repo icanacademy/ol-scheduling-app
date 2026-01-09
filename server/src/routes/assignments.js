@@ -10,13 +10,17 @@ import {
   validateAssignment,
   deleteAllAssignments,
   copyWeek,
-  copyDay
+  copyDay,
+  findDuplicates,
+  removeDuplicates
 } from '../controllers/assignmentController.js';
 
 const router = express.Router();
 
 router.get('/', getAssignmentsByDate);
 router.get('/date-range', getAssignmentsByDateRange);
+router.get('/duplicates', findDuplicates);
+router.post('/duplicates/remove', removeDuplicates);
 router.post('/validate', validateAssignment);
 router.post('/copy-day', copyDay);
 router.post('/copy-week', copyWeek);

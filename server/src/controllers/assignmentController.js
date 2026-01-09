@@ -255,6 +255,39 @@ export const copyDay = async (req, res) => {
   }
 };
 
+export const findDuplicates = async (req, res) => {
+  try {
+    const duplicates = await Assignment.findDuplicates();
+    res.json({
+      count: duplicates.length,
+      duplicates
+    });
+  } catch (error) {
+    console.error('Error finding duplicates:', error);
+    res.status(500).json({ error: 'Failed to find duplicates', message: error.message });
+  }
+};
+
+export const removeDuplicates = async (req, res) => {
+  try {
+    // Create backup before removing duplicates
+    const backup = await Backup.create('Auto-backup before removing duplicate assignments');
+
+    const result = await Assignment.removeDuplicates();
+    res.json({
+      message: `Removed ${result.removed} duplicate assignment(s)`,
+      ...result,
+      backup: {
+        filename: backup.filename,
+        message: 'Backup created automatically'
+      }
+    });
+  } catch (error) {
+    console.error('Error removing duplicates:', error);
+    res.status(500).json({ error: 'Failed to remove duplicates', message: error.message });
+  }
+};
+
 export const copyWeek = async (req, res) => {
   try {
     const { sourceDate, targetDate } = req.body;

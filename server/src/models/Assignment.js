@@ -99,6 +99,38 @@ class Assignment {
     return result.rows[0];
   }
 
+  // Check if an exact duplicate assignment exists
+  static async checkDuplicate(date, time_slot_id, subject, studentIds, teacherIds) {
+    if (!studentIds || studentIds.length === 0) return null;
+
+    // Sort IDs for consistent comparison
+    const sortedStudentIds = [...studentIds].sort((a, b) => a - b);
+    const sortedTeacherIds = teacherIds ? [...teacherIds].sort((a, b) => a - b) : [];
+
+    const result = await pool.query(`
+      WITH existing_assignments AS (
+        SELECT
+          a.id,
+          ARRAY_AGG(DISTINCT ast.student_id ORDER BY ast.student_id) as student_ids,
+          ARRAY_AGG(DISTINCT at.teacher_id ORDER BY at.teacher_id) as teacher_ids
+        FROM assignments a
+        LEFT JOIN assignment_students ast ON a.id = ast.assignment_id
+        LEFT JOIN assignment_teachers at ON a.id = at.assignment_id
+        WHERE a.date = $1
+          AND a.time_slot_id = $2
+          AND COALESCE(a.subject, '') = COALESCE($3, '')
+          AND a.is_active = true
+        GROUP BY a.id
+      )
+      SELECT id FROM existing_assignments
+      WHERE student_ids = $4::integer[]
+        AND teacher_ids = $5::integer[]
+      LIMIT 1
+    `, [date, time_slot_id, subject || '', sortedStudentIds, sortedTeacherIds]);
+
+    return result.rows[0]?.id || null;
+  }
+
   // Create a new assignment
   static async create(data) {
     const client = await pool.connect();
@@ -106,6 +138,17 @@ class Assignment {
       await client.query('BEGIN');
 
       const { date, time_slot_id, teachers = [], students = [], notes, subject, color_keyword } = data;
+
+      // Check for exact duplicate before creating
+      const studentIds = students.map(s => s.student_id).filter(Boolean);
+      const teacherIds = teachers.map(t => t.teacher_id).filter(Boolean);
+      const existingId = await this.checkDuplicate(date, time_slot_id, subject, studentIds, teacherIds);
+
+      if (existingId) {
+        await client.query('ROLLBACK');
+        console.log(`Duplicate assignment detected (existing ID: ${existingId}). Skipping creation.`);
+        return await this.getById(existingId);
+      }
 
       // Double-check validation before creation to prevent duplicates
       const validation = await this.validate(data);
@@ -395,6 +438,85 @@ class Assignment {
     return {
       valid: errors.length === 0,
       errors
+    };
+  }
+
+  // Find duplicate assignments (same date, time_slot, subject, and student combinations)
+  static async findDuplicates() {
+    const result = await pool.query(`
+      WITH assignment_signatures AS (
+        SELECT
+          a.id,
+          a.date,
+          a.time_slot_id,
+          COALESCE(a.subject, '') as subject,
+          a.notes,
+          a.created_at,
+          ARRAY_AGG(DISTINCT ast.student_id ORDER BY ast.student_id) as student_ids,
+          ARRAY_AGG(DISTINCT at.teacher_id ORDER BY at.teacher_id) as teacher_ids
+        FROM assignments a
+        LEFT JOIN assignment_students ast ON a.id = ast.assignment_id
+        LEFT JOIN assignment_teachers at ON a.id = at.assignment_id
+        WHERE a.is_active = true
+        GROUP BY a.id, a.date, a.time_slot_id, a.subject, a.notes, a.created_at
+      ),
+      duplicates AS (
+        SELECT
+          date,
+          time_slot_id,
+          subject,
+          student_ids,
+          teacher_ids,
+          ARRAY_AGG(id ORDER BY created_at) as assignment_ids,
+          COUNT(*) as duplicate_count
+        FROM assignment_signatures
+        GROUP BY date, time_slot_id, subject, student_ids, teacher_ids
+        HAVING COUNT(*) > 1
+      )
+      SELECT
+        d.*,
+        json_agg(
+          json_build_object(
+            'id', a.id,
+            'notes', a.notes,
+            'created_at', a.created_at
+          ) ORDER BY a.created_at
+        ) as assignment_details
+      FROM duplicates d
+      JOIN assignments a ON a.id = ANY(d.assignment_ids)
+      GROUP BY d.date, d.time_slot_id, d.subject, d.student_ids, d.teacher_ids, d.assignment_ids, d.duplicate_count
+      ORDER BY d.date, d.time_slot_id
+    `);
+    return result.rows;
+  }
+
+  // Remove duplicate assignments (keeps the oldest one)
+  static async removeDuplicates() {
+    const duplicates = await this.findDuplicates();
+
+    if (duplicates.length === 0) {
+      return { removed: 0, duplicatesFound: 0 };
+    }
+
+    const idsToDelete = [];
+    for (const dup of duplicates) {
+      // Keep the first (oldest) assignment, delete the rest
+      const [keepId, ...deleteIds] = dup.assignment_ids;
+      idsToDelete.push(...deleteIds);
+    }
+
+    if (idsToDelete.length > 0) {
+      // Soft delete duplicates
+      await pool.query(
+        `UPDATE assignments SET is_active = false WHERE id = ANY($1)`,
+        [idsToDelete]
+      );
+    }
+
+    return {
+      removed: idsToDelete.length,
+      duplicatesFound: duplicates.length,
+      removedIds: idsToDelete
     };
   }
 }

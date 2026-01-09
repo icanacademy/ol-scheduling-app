@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getStudents, getTimeSlots, deleteStudent, updateStudent, deleteAllStudents, previewStudentsFromNotion, createStudent, getAssignments } from '../services/api';
+import { getStudents, getTimeSlots, deleteStudent, updateStudent, deleteAllStudents, previewStudentsFromNotion, createStudent, getAssignmentsByDateRange } from '../services/api';
 import { dayToDate, weekDays, dateToDay } from '../utils/dayMapping';
 import StudentFormModal from './StudentFormModal';
 import NotionImportModal from './NotionImportModal';
@@ -26,33 +26,51 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     enabled: !!selectedDate,
   });
 
-  // Fetch assignments for the selected date to determine student status
-  const { data: assignments } = useQuery({
-    queryKey: ['assignments', selectedDate],
+  // Get the Monday date for the week (start of week)
+  const mondayDate = useMemo(() => dayToDate('Monday'), []);
+
+  // Fetch all week assignments in a single call (7 days starting from Monday)
+  const { data: weekAssignmentsData } = useQuery({
+    queryKey: ['weekAssignments', mondayDate],
     queryFn: async () => {
-      const response = await getAssignments(selectedDate);
+      if (!mondayDate) return [];
+      const response = await getAssignmentsByDateRange(mondayDate, 7);
       return response.data;
     },
-    enabled: !!selectedDate,
-  });
-
-  // Fetch assignments for all week days to show class days
-  const { data: weekAssignments } = useQuery({
-    queryKey: ['weekAssignments'],
-    queryFn: async () => {
-      const allAssignments = {};
-      for (const day of weekDays) {
-        const date = dayToDate(day);
-        if (date) {
-          const response = await getAssignments(date);
-          allAssignments[day] = response.data;
-        }
-      }
-      return allAssignments;
-    },
-    enabled: true,
+    enabled: !!mondayDate,
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes
   });
+
+  // Transform flat assignments array into day-keyed object for compatibility
+  const weekAssignments = useMemo(() => {
+    if (!weekAssignmentsData) return null;
+
+    const byDay = {};
+    for (const day of weekDays) {
+      byDay[day] = [];
+    }
+
+    for (const assignment of weekAssignmentsData) {
+      // Parse the date and get the day name
+      const assignmentDate = new Date(assignment.date);
+      const dayIndex = assignmentDate.getUTCDay();
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayName = dayNames[dayIndex];
+
+      if (byDay[dayName]) {
+        byDay[dayName].push(assignment);
+      }
+    }
+
+    return byDay;
+  }, [weekAssignmentsData]);
+
+  // Get assignments for the selected date from weekAssignments
+  const assignments = useMemo(() => {
+    if (!weekAssignments || !selectedDate) return [];
+    const dayName = dateToDay(selectedDate);
+    return weekAssignments[dayName] || [];
+  }, [weekAssignments, selectedDate]);
 
   // Fetch time slots for display
   const { data: timeSlots } = useQuery({

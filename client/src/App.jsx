@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
+import api from './services/api';
 import TeachersPage from './components/TeachersPage';
 import StudentsPage from './components/StudentsPage';
 import StudentPrintPage from './components/StudentPrintPage';
@@ -25,6 +26,11 @@ const queryClient = new QueryClient({
 function App() {
   const [selectedDay, setSelectedDay] = useState('All Week');
   const [activeTab, setActiveTab] = useState('schedule');
+
+  // Warm up the API on app load to reduce cold start delays
+  useEffect(() => {
+    api.get('/health').catch(() => {});
+  }, []);
 
   return (
     <QueryClientProvider client={queryClient}>

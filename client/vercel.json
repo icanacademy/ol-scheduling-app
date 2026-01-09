@@ -1,4 +1,7 @@
 {
+  "framework": "vite",
+  "installCommand": "npm install --prefer-offline",
+  "buildCommand": "npm run build",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ]
