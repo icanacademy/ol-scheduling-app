@@ -84,9 +84,11 @@ class Student {
          s.grade,
          s.country,
          CASE
+           WHEN s.status = 'Finished' THEN 'Finished'
+           WHEN s.status = 'New' THEN 'New'
            WHEN s.status = 'Stopped' THEN 'On Hold'
            WHEN s.availability IS NULL OR s.availability = '[]'::jsonb THEN 'On Hold'
-           ELSE s.status
+           ELSE COALESCE(s.status, 'Active')
          END as status,
          COALESCE(subj.subject_names, ARRAY[]::text[]) as subjects,
          s.program_start_date,
@@ -110,17 +112,32 @@ class Student {
     return result.rows;
   }
 
-  // Update student status
+  // Update student status (updates all records with the same name for directory consistency)
   static async updateStatus(id, status) {
     // Map "On Hold" to "Stopped" for database storage (Students tab uses "Stopped")
     const dbStatus = status === 'On Hold' ? 'Stopped' : status;
+
+    // First get the student's name
+    const studentResult = await pool.query(
+      `SELECT name FROM students WHERE id = $1`,
+      [id]
+    );
+
+    if (studentResult.rows.length === 0) {
+      return null;
+    }
+
+    const studentName = studentResult.rows[0].name;
+
+    // Update all students with the same name (for directory consistency)
     const result = await pool.query(
       `UPDATE students
        SET status = $1, updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2 AND is_active = true
+       WHERE LOWER(name) = LOWER($2) AND is_active = true
        RETURNING *`,
-      [dbStatus, id]
+      [dbStatus, studentName]
     );
+
     return result.rows[0];
   }
 
