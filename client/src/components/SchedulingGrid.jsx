@@ -73,6 +73,28 @@ function SchedulingGrid({ timeSlots, assignments, selectedDate, onRefetch, isRea
     return Array.from(teacherSet).sort();
   }, [teachers, assignments]);
 
+  // Create a map from teacher name to their availability array
+  const teacherAvailabilityMap = useMemo(() => {
+    const map = new Map();
+    if (teachers && teachers.length > 0) {
+      teachers.forEach(teacher => {
+        if (!map.has(teacher.name)) {
+          map.set(teacher.name, teacher.availability || []);
+        }
+      });
+    }
+    return map;
+  }, [teachers]);
+
+  // Helper function to check if a teacher is available at a given time slot
+  const isTeacherAvailable = (teacherName, timeSlotId) => {
+    const availability = teacherAvailabilityMap.get(teacherName);
+    if (!availability || availability.length === 0) {
+      return false;
+    }
+    return availability.includes(timeSlotId);
+  };
+
   const handleCellClick = (timeSlotId) => {
     if (isReadOnly) {
       // Don't allow editing in read-only mode (individual day views)
@@ -221,9 +243,15 @@ function SchedulingGrid({ timeSlots, assignments, selectedDate, onRefetch, isRea
                       >
                         <div className="space-y-2 min-h-[80px]">
                           {teacherAssignments.length === 0 ? (
-                            <div className="text-gray-400 italic text-center py-2 text-xs">
-                              No class
-                            </div>
+                            isTeacherAvailable(teacherName, slot.id) ? (
+                              <div className="text-green-600 font-medium text-center py-2 text-xs">
+                                Free
+                              </div>
+                            ) : (
+                              <div className="text-gray-300 text-center py-2 text-xs">
+                                -
+                              </div>
+                            )
                           ) : (
                             teacherAssignments.map((assignment, idx) => {
                               const colors = getAssignmentColors(assignment);

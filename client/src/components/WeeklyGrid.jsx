@@ -70,6 +70,28 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
     return Array.from(teacherSet).sort();
   }, [teachers, assignments]);
 
+  // Create a map from teacher name to their availability array
+  const teacherAvailabilityMap = useMemo(() => {
+    const map = new Map();
+    if (teachers && teachers.length > 0) {
+      teachers.forEach(teacher => {
+        if (!map.has(teacher.name)) {
+          map.set(teacher.name, teacher.availability || []);
+        }
+      });
+    }
+    return map;
+  }, [teachers]);
+
+  // Helper function to check if a teacher is available at a given time slot
+  const isTeacherAvailable = (teacherName, timeSlotId) => {
+    const availability = teacherAvailabilityMap.get(teacherName);
+    if (!availability || availability.length === 0) {
+      return false;
+    }
+    return availability.includes(timeSlotId);
+  };
+
   // Group assignments by teacher, time slot, and student combination
   const groupedAssignments = useMemo(() => {
     const groups = {};
@@ -264,9 +286,20 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                       }}
                     >
                       {!group || group.classes.length === 0 ? (
-                        <div className="text-gray-400 italic text-center py-4 text-sm">
-                          No classes
-                        </div>
+                        isTeacherAvailable(teacherName, slot.id) ? (
+                          <div className="bg-gradient-to-br from-green-100 to-green-200 border-2 border-green-400 rounded-lg p-4 text-center animate-pulse">
+                            <div className="text-green-700 font-black text-2xl mb-1">
+                              FREE
+                            </div>
+                            <div className="text-green-600 text-xs font-semibold">
+                              Click to assign
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="text-gray-300 text-center py-4 text-sm">
+                            -
+                          </div>
+                        )
                       ) : (
                         <div className="space-y-3">
                           {/* Show each different class */}
