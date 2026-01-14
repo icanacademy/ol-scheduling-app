@@ -46,13 +46,23 @@ function Dashboard({ selectedDay }) {
     cacheTime: 0, // Don't cache data
   });
   
-  // Fetch teachers - for All Week view, get from any day; for single day, get specific day
+  // Fetch teachers - for All Week view, get all 7 days; for single day, get specific day
   const { data: teachers } = useQuery({
-    queryKey: ['teachers', selectedDay === 'All Week' ? 'Monday' : selectedDate],
+    queryKey: ['teachers', selectedDay === 'All Week' ? 'all-week' : selectedDate],
     queryFn: async () => {
-      const targetDate = selectedDay === 'All Week' ? dayToDate('Monday') : selectedDate;
-      const response = await getTeachers(targetDate);
-      return response.data;
+      if (selectedDay === 'All Week') {
+        // Fetch teachers for all 7 days
+        const teachersByDay = {};
+        for (const day of weekDays) {
+          const date = dayToDate(day);
+          const response = await getTeachers(date);
+          teachersByDay[day] = response.data;
+        }
+        return teachersByDay;
+      } else {
+        const response = await getTeachers(selectedDate);
+        return response.data;
+      }
     },
     enabled: !!selectedDay,
   });
@@ -328,6 +338,7 @@ function Dashboard({ selectedDay }) {
             students={students || []}
             onCellClick={handleWeeklyCellClick}
             onRefetch={refetch}
+            isAllWeekMode={true}
           />
         ) : (
           <SchedulingGrid

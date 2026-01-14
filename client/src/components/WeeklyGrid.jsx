@@ -3,8 +3,19 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { deleteAssignment } from '../services/api';
 import { weekDays, dayToDate, dateToDay } from '../utils/dayMapping';
 
-function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, onRefetch }) {
+function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, onRefetch, isAllWeekMode = false }) {
   const queryClient = useQueryClient();
+
+  // Day abbreviations for badges
+  const dayAbbrev = {
+    Monday: 'Mon',
+    Tuesday: 'Tue',
+    Wednesday: 'Wed',
+    Thursday: 'Thu',
+    Friday: 'Fri',
+    Saturday: 'Sat',
+    Sunday: 'Sun'
+  };
 
   // Delete assignment mutation
   const deleteMutation = useMutation({
@@ -50,16 +61,32 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
 
   // Get all unique teachers (deduplicated by name)
   const allTeachers = useMemo(() => {
-    if (teachers && teachers.length > 0) {
-      // Create a map to deduplicate teachers by name
+    if (teachers) {
       const uniqueTeachers = new Map();
-      teachers.forEach(teacher => {
-        if (!uniqueTeachers.has(teacher.name)) {
-          uniqueTeachers.set(teacher.name, teacher);
-        }
-      });
-      return Array.from(uniqueTeachers.keys()).sort();
+
+      if (isAllWeekMode && typeof teachers === 'object' && !Array.isArray(teachers)) {
+        // All Week mode: teachers is an object with days as keys
+        Object.values(teachers).forEach(dayTeachers => {
+          dayTeachers.forEach(teacher => {
+            if (!uniqueTeachers.has(teacher.name)) {
+              uniqueTeachers.set(teacher.name, teacher);
+            }
+          });
+        });
+      } else if (Array.isArray(teachers) && teachers.length > 0) {
+        // Single day mode: teachers is an array
+        teachers.forEach(teacher => {
+          if (!uniqueTeachers.has(teacher.name)) {
+            uniqueTeachers.set(teacher.name, teacher);
+          }
+        });
+      }
+
+      if (uniqueTeachers.size > 0) {
+        return Array.from(uniqueTeachers.keys()).sort();
+      }
     }
+
     // Fallback to assigned teachers if no teacher data available
     const teacherSet = new Set();
     assignments.forEach((assignment) => {
@@ -68,12 +95,31 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
       });
     });
     return Array.from(teacherSet).sort();
-  }, [teachers, assignments]);
+  }, [teachers, assignments, isAllWeekMode]);
 
-  // Create a map from teacher name to their availability array
+  // Create a map from teacher name to their availability (per day for All Week mode)
+  const teacherAvailabilityByDay = useMemo(() => {
+    if (!isAllWeekMode || !teachers || typeof teachers !== 'object' || Array.isArray(teachers)) {
+      return {};
+    }
+
+    const lookup = {};
+    Object.entries(teachers).forEach(([day, dayTeachers]) => {
+      dayTeachers.forEach(teacher => {
+        if (!lookup[teacher.name]) {
+          lookup[teacher.name] = {};
+        }
+        lookup[teacher.name][day] = teacher.availability || [];
+      });
+    });
+
+    return lookup;
+  }, [isAllWeekMode, teachers]);
+
+  // Create a map from teacher name to their availability array (for single day mode)
   const teacherAvailabilityMap = useMemo(() => {
     const map = new Map();
-    if (teachers && teachers.length > 0) {
+    if (!isAllWeekMode && teachers && Array.isArray(teachers) && teachers.length > 0) {
       teachers.forEach(teacher => {
         if (!map.has(teacher.name)) {
           map.set(teacher.name, teacher.availability || []);
@@ -81,9 +127,9 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
       });
     }
     return map;
-  }, [teachers]);
+  }, [isAllWeekMode, teachers]);
 
-  // Helper function to check if a teacher is available at a given time slot
+  // Helper function to check if a teacher is available at a given time slot (single day mode)
   const isTeacherAvailable = (teacherName, timeSlotId) => {
     const availability = teacherAvailabilityMap.get(teacherName);
     if (!availability || availability.length === 0) {
@@ -286,19 +332,64 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                       }}
                     >
                       {!group || group.classes.length === 0 ? (
-                        isTeacherAvailable(teacherName, slot.id) ? (
-                          <div className="bg-gradient-to-br from-green-100 to-green-200 border-2 border-green-400 rounded-lg p-4 text-center animate-pulse">
-                            <div className="text-green-700 font-black text-2xl mb-1">
-                              FREE
-                            </div>
-                            <div className="text-green-600 text-xs font-semibold">
-                              Click to assign
-                            </div>
-                          </div>
+                        isAllWeekMode ? (
+                          // All Week mode - show day badges for available days
+                          (() => {
+                            const freeDays = [];
+                            weekDays.forEach(day => {
+                              const availability = teacherAvailabilityByDay[teacherName]?.[day] || [];
+                              const isAvailableOnDay = availability.includes(slot.id);
+                              if (isAvailableOnDay) {
+                                freeDays.push(day);
+                              }
+                            });
+
+                            if (freeDays.length === 0) {
+                              return (
+                                <div className="text-gray-300 text-center py-4 text-sm">
+                                  -
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="bg-gradient-to-br from-green-100 to-green-200 border-2 border-green-400 rounded-lg p-3 text-center animate-pulse">
+                                <div className="text-green-700 font-black text-xl mb-2">
+                                  FREE
+                                </div>
+                                <div className="flex flex-wrap gap-1 justify-center mb-2">
+                                  {freeDays.map(day => (
+                                    <span
+                                      key={day}
+                                      className="px-2 py-1 bg-green-500 text-white rounded text-xs font-bold"
+                                      title={`Available on ${day}`}
+                                    >
+                                      {dayAbbrev[day]}
+                                    </span>
+                                  ))}
+                                </div>
+                                <div className="text-green-600 text-xs font-semibold">
+                                  Click to assign
+                                </div>
+                              </div>
+                            );
+                          })()
                         ) : (
-                          <div className="text-gray-300 text-center py-4 text-sm">
-                            -
-                          </div>
+                          // Single day mode
+                          isTeacherAvailable(teacherName, slot.id) ? (
+                            <div className="bg-gradient-to-br from-green-100 to-green-200 border-2 border-green-400 rounded-lg p-4 text-center animate-pulse">
+                              <div className="text-green-700 font-black text-2xl mb-1">
+                                FREE
+                              </div>
+                              <div className="text-green-600 text-xs font-semibold">
+                                Click to assign
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-gray-300 text-center py-4 text-sm">
+                              -
+                            </div>
+                          )
                         )
                       ) : (
                         <div className="space-y-3">
