@@ -10,7 +10,6 @@ import BackupRestorePage from './components/BackupRestorePage';
 import TeacherHoursPage from './components/TeacherHoursPage';
 import DayWrapper from './components/DayWrapper';
 import ChatBubble from './components/ChatBubble';
-import NotesPage from './components/NotesPage';
 import StudentDirectoryPage from './components/StudentDirectoryPage';
 
 const queryClient = new QueryClient({
@@ -138,16 +137,6 @@ function App() {
                 Backups
               </button>
               <button
-                onClick={() => setActiveTab('notes')}
-                className={`px-6 py-3 font-semibold text-base border-b-3 transition-all ${
-                  activeTab === 'notes'
-                    ? 'border-blue-600 text-blue-600 bg-blue-50'
-                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
-              >
-                Notes
-              </button>
-              <button
                 onClick={() => setActiveTab('directory')}
                 className={`px-6 py-3 font-semibold text-base border-b-3 transition-all ${
                   activeTab === 'directory'
@@ -169,7 +158,6 @@ function App() {
           {activeTab === 'student-report' && <DayWrapper selectedDay={selectedDay} Component={StudentPrintPage} />}
           {activeTab === 'teacher-report' && <DayWrapper selectedDay={selectedDay} Component={TeacherPrintPage} />}
           {activeTab === 'backups' && <BackupRestorePage />}
-          {activeTab === 'notes' && <DayWrapper selectedDay={selectedDay} Component={NotesPage} />}
           {activeTab === 'directory' && <StudentDirectoryPage />}
         </main>
 
