@@ -7,7 +7,6 @@ import StudentsPage from './components/StudentsPage';
 import StudentPrintPage from './components/StudentPrintPage';
 import TeacherPrintPage from './components/TeacherPrintPage';
 import BackupRestorePage from './components/BackupRestorePage';
-import TeacherHoursPage from './components/TeacherHoursPage';
 import DayWrapper from './components/DayWrapper';
 import ChatBubble from './components/ChatBubble';
 import StudentDirectoryPage from './components/StudentDirectoryPage';
@@ -97,16 +96,6 @@ function App() {
                 Students
               </button>
               <button
-                onClick={() => setActiveTab('teacher-hours')}
-                className={`px-6 py-3 font-semibold text-base border-b-3 transition-all ${
-                  activeTab === 'teacher-hours'
-                    ? 'border-blue-600 text-blue-600 bg-blue-50'
-                    : 'border-transparent text-gray-600 hover:text-gray-900 hover:bg-gray-100'
-                }`}
-              >
-                Teacher Hours
-              </button>
-              <button
                 onClick={() => setActiveTab('student-report')}
                 className={`px-6 py-3 font-semibold text-base border-b-3 transition-all ${
                   activeTab === 'student-report'
@@ -154,7 +143,6 @@ function App() {
           {activeTab === 'schedule' && <Dashboard selectedDay={selectedDay} />}
           {activeTab === 'teachers' && <DayWrapper selectedDay={selectedDay} Component={TeachersPage} />}
           {activeTab === 'students' && <DayWrapper selectedDay={selectedDay} Component={StudentsPage} />}
-          {activeTab === 'teacher-hours' && <DayWrapper selectedDay={selectedDay} Component={TeacherHoursPage} />}
           {activeTab === 'student-report' && <DayWrapper selectedDay={selectedDay} Component={StudentPrintPage} />}
           {activeTab === 'teacher-report' && <DayWrapper selectedDay={selectedDay} Component={TeacherPrintPage} />}
           {activeTab === 'backups' && <BackupRestorePage />}
