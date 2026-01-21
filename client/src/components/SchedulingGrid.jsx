@@ -253,43 +253,68 @@ function SchedulingGrid({ timeSlots, assignments, selectedDate, onRefetch, isRea
                               </div>
                             )
                           ) : (
-                            teacherAssignments.map((assignment, idx) => {
-                              const colors = getAssignmentColors(assignment);
-                              return (
-                                <div key={idx} className={`${colors.bg} ${colors.text} rounded-lg p-3 shadow-md border ${colors.border} relative group`}>
-                                  {/* Delete button */}
-                                  {!isReadOnly && (
-                                    <button
-                                      onClick={(e) => handleDeleteAssignment(e, assignment.id)}
-                                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center text-sm font-bold shadow-md z-10"
-                                      title="Delete this class"
-                                    >
-                                      ×
-                                    </button>
-                                  )}
-                                  
-                                  {/* Subject */}
-                                  {assignment.subject && (
-                                    <div className={`text-xs font-semibold ${colors.subject} mb-1`}>
-                                      {assignment.subject}
-                                    </div>
-                                  )}
-                                  
-                                  {/* Students */}
-                                  {assignment.students?.length > 0 && (
-                                    <div className="text-xs">
-                                      <div className="font-medium mb-1">
-                                        {assignment.students.length} student{assignment.students.length !== 1 ? 's' : ''}
+                            <>
+                              {teacherAssignments.map((assignment, idx) => {
+                                const colors = getAssignmentColors(assignment);
+                                return (
+                                  <div key={idx} className={`${colors.bg} ${colors.text} rounded-lg p-3 shadow-md border ${colors.border} relative group`}>
+                                    {/* Delete button */}
+                                    {!isReadOnly && (
+                                      <button
+                                        onClick={(e) => handleDeleteAssignment(e, assignment.id)}
+                                        className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center text-sm font-bold shadow-md z-10"
+                                        title="Delete this class"
+                                      >
+                                        ×
+                                      </button>
+                                    )}
+
+                                    {/* Subject */}
+                                    {assignment.subject && (
+                                      <div className={`text-xs font-semibold ${colors.subject} mb-1`}>
+                                        {assignment.subject}
                                       </div>
-                                      <div className="opacity-80">
-                                        {assignment.students.slice(0, 3).map(s => s.name).join(', ')}
-                                        {assignment.students.length > 3 && ` +${assignment.students.length - 3} more`}
+                                    )}
+
+                                    {/* Students */}
+                                    {assignment.students?.length > 0 && (
+                                      <div className="text-xs">
+                                        <div className="font-medium mb-1">
+                                          {assignment.students.length} student{assignment.students.length !== 1 ? 's' : ''}
+                                        </div>
+                                        <div className="opacity-80">
+                                          {assignment.students.slice(0, 3).map(s => s.name).join(', ')}
+                                          {assignment.students.length > 3 && ` +${assignment.students.length - 3} more`}
+                                        </div>
                                       </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+
+                              {/* Show note if teacher has other free time slots today */}
+                              {(() => {
+                                const availability = teacherAvailabilityMap.get(teacherName);
+                                if (!availability || availability.length === 0) return null;
+
+                                // Count free slots (available but no assignment)
+                                const freeSlotsCount = availability.filter(slotId => {
+                                  const slotAssignments = assignmentMap[slotId] || [];
+                                  return !slotAssignments.some(a => a.teachers?.some(t => t.name === teacherName));
+                                }).length;
+
+                                if (freeSlotsCount > 0) {
+                                  return (
+                                    <div className="bg-green-50 border border-green-200 rounded px-2 py-1 text-center">
+                                      <span className="text-green-700 text-xs font-medium">
+                                        {freeSlotsCount} other free slot{freeSlotsCount !== 1 ? 's' : ''} today
+                                      </span>
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            })
+                                  );
+                                }
+                                return null;
+                              })()}
+                            </>
                           )}
                         </div>
                       </td>

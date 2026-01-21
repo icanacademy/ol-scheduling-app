@@ -406,19 +406,19 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                                   ×
                                 </button>
                               )}
-                              
+
                               {/* Day indicator */}
                               <div className={`inline-block px-2 py-1 rounded-full text-xs font-medium mb-2 ${getDayColor(classGroup.days)}`}>
                                 {formatDays(classGroup.days)}
                               </div>
-                              
+
                               {/* Subject */}
                               {classGroup.subject && (
                                 <div className={`text-xs font-semibold ${getSubjectColor(classGroup)} mb-1`}>
                                   {classGroup.subject}
                                 </div>
                               )}
-                              
+
                               {/* Students */}
                               {classGroup.students.length > 0 && (
                                 <div className="text-xs">
@@ -433,6 +433,47 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                               )}
                             </div>
                           ))}
+
+                          {/* Also show FREE days for this teacher at this time slot */}
+                          {isAllWeekMode && (() => {
+                            const freeDays = [];
+                            weekDays.forEach(day => {
+                              const availability = teacherAvailabilityByDay[teacherName]?.[day] || [];
+                              const isAvailableOnDay = availability.includes(slot.id);
+
+                              // Check if teacher has a class on this day at this time slot
+                              const hasClassOnDay = group?.classes?.some(classGroup =>
+                                classGroup.days.includes(day)
+                              );
+
+                              // Show as free if available but no class scheduled
+                              if (isAvailableOnDay && !hasClassOnDay) {
+                                freeDays.push(day);
+                              }
+                            });
+
+                            if (freeDays.length > 0) {
+                              return (
+                                <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-300 rounded-lg p-2 text-center">
+                                  <div className="text-green-700 font-bold text-sm mb-1">
+                                    Also FREE:
+                                  </div>
+                                  <div className="flex flex-wrap gap-1 justify-center">
+                                    {freeDays.map(day => (
+                                      <span
+                                        key={day}
+                                        className="px-2 py-1 bg-green-500 text-white rounded text-xs font-bold"
+                                        title={`Available on ${day}`}
+                                      >
+                                        {dayAbbrev[day]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       )}
                     </td>
