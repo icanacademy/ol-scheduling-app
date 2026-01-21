@@ -92,7 +92,8 @@ function SchedulingGrid({ timeSlots, assignments, selectedDate, onRefetch, isRea
     if (!availability || availability.length === 0) {
       return false;
     }
-    return availability.includes(timeSlotId);
+    // Handle both string and number timeSlotId for comparison
+    return availability.some(a => a == timeSlotId);
   };
 
   const handleCellClick = (timeSlotId) => {
@@ -298,8 +299,11 @@ function SchedulingGrid({ timeSlots, assignments, selectedDate, onRefetch, isRea
                                 if (!availability || availability.length === 0) return null;
 
                                 // Count free slots (available but no assignment)
+                                // Use loose comparison to find matching slots in assignmentMap
                                 const freeSlotsCount = availability.filter(slotId => {
-                                  const slotAssignments = assignmentMap[slotId] || [];
+                                  // Find matching key in assignmentMap (handle string/number mismatch)
+                                  const matchingKey = Object.keys(assignmentMap).find(k => k == slotId);
+                                  const slotAssignments = matchingKey ? assignmentMap[matchingKey] : [];
                                   return !slotAssignments.some(a => a.teachers?.some(t => t.name === teacherName));
                                 }).length;
 
