@@ -4,6 +4,7 @@ import { deleteAssignment } from '../services/api';
 import { weekDays, dayToDate, dateToDay } from '../utils/dayMapping';
 
 // Online Scheduler - Weekly Grid Component
+// Shows weekly schedule with "Also FREE" feature for teachers
 function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, onRefetch, isAllWeekMode = false }) {
   const queryClient = useQueryClient();
 
