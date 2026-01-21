@@ -113,11 +113,6 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
       });
     });
 
-    // Debug: Log first teacher's availability
-    const firstTeacher = Object.keys(lookup)[0];
-    console.log('=== DEBUG: First teacher:', firstTeacher);
-    console.log('=== DEBUG: teacherAvailabilityByDay:', lookup);
-
     return lookup;
   }, [isAllWeekMode, teachers]);
 
@@ -452,11 +447,6 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                               const hasClassOnDay = group?.classes?.some(classGroup =>
                                 classGroup.days.includes(day)
                               );
-
-                              // Debug logging for T.AJ
-                              if (teacherName === 'T.AJ' && slot.id == 1) {
-                                console.log(`T.AJ ${day}: availability=`, availability, `slot.id=${slot.id}`, `isAvailable=${isAvailableOnDay}`, `hasClass=${hasClassOnDay}`);
-                              }
 
                               // Show as free if available but no class scheduled
                               if (isAvailableOnDay && !hasClassOnDay) {
