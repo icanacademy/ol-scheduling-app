@@ -278,6 +278,10 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
         }
       `}</style>
       <div className="overflow-x-auto max-h-[calc(100vh-300px)] overflow-y-auto">
+        {/* VERY VISIBLE TEST - This should always appear at the top of the grid */}
+        <div className="bg-red-500 text-white text-center font-bold py-2 mb-2">
+          ⚠️ TEST - isAllWeekMode: {String(isAllWeekMode)} - If you see this, the code is working! ⚠️
+        </div>
         <table className="w-full border-collapse">
         <thead>
           <tr className="bg-gray-200">
