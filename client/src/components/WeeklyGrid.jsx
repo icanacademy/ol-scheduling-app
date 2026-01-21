@@ -338,7 +338,8 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                             const freeDays = [];
                             weekDays.forEach(day => {
                               const availability = teacherAvailabilityByDay[teacherName]?.[day] || [];
-                              const isAvailableOnDay = availability.includes(slot.id);
+                              // Handle both string and number slot.id for comparison
+                              const isAvailableOnDay = availability.some(a => a == slot.id);
                               if (isAvailableOnDay) {
                                 freeDays.push(day);
                               }
@@ -439,7 +440,8 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                             const freeDays = [];
                             weekDays.forEach(day => {
                               const availability = teacherAvailabilityByDay[teacherName]?.[day] || [];
-                              const isAvailableOnDay = availability.includes(slot.id);
+                              // Handle both string and number slot.id for comparison
+                              const isAvailableOnDay = availability.some(a => a == slot.id);
 
                               // Check if teacher has a class on this day at this time slot
                               const hasClassOnDay = group?.classes?.some(classGroup =>

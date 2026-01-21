@@ -11,6 +11,36 @@ import {
 } from '../services/api';
 import { weekDays, dayToDate, dateToDay } from '../utils/dayMapping';
 
+// Helper to merge teachers from multiple days into a single list with combined availability
+function mergeTeachersFromAllDays(teachersByDay) {
+  const mergedMap = new Map();
+
+  Object.entries(teachersByDay).forEach(([day, dayTeachers]) => {
+    dayTeachers.forEach(teacher => {
+      if (!mergedMap.has(teacher.name)) {
+        // First time seeing this teacher - store with their availability for this day
+        mergedMap.set(teacher.name, {
+          ...teacher,
+          availabilityByDay: { [day]: teacher.availability || [] }
+        });
+      } else {
+        // Already seen this teacher - add this day's availability
+        const existing = mergedMap.get(teacher.name);
+        existing.availabilityByDay[day] = teacher.availability || [];
+      }
+    });
+  });
+
+  // Convert back to array, combining all availabilities
+  return Array.from(mergedMap.values()).map(teacher => ({
+    ...teacher,
+    // Combined availability = union of all days' availability
+    availability: [...new Set(
+      Object.values(teacher.availabilityByDay).flat()
+    )]
+  }));
+}
+
 function AssignmentModal({
   isOpen,
   onClose,
@@ -38,53 +68,102 @@ function AssignmentModal({
   // Get the time slot name for display
   const timeSlot = timeSlots.find((ts) => ts.id === timeSlotId);
 
-  // Fetch all teachers
+  // Fetch all teachers - in All Week mode, fetch from all days to get complete availability
   const { data: teachers, error: teachersError, isLoading: teachersLoading } = useQuery({
-    queryKey: ['teachers', selectedDate],
+    queryKey: ['teachers-modal', isAllWeekMode ? 'all-week' : selectedDate],
     queryFn: async () => {
-      if (!selectedDate) return [];
-      const response = await getTeachers(selectedDate);
-      const teachersData = response?.data || [];
-      
-      // Deduplicate teachers by name to prevent duplicates from API
-      const uniqueTeachers = [];
-      const seenNames = new Set();
-      
-      teachersData.forEach(teacher => {
-        if (!seenNames.has(teacher.name)) {
-          seenNames.add(teacher.name);
-          uniqueTeachers.push(teacher);
+      if (isAllWeekMode) {
+        // Fetch teachers for all 7 days and merge them
+        const teachersByDay = {};
+        for (const day of weekDays) {
+          const date = dayToDate(day);
+          if (date) {
+            const response = await getTeachers(date);
+            teachersByDay[day] = response?.data || [];
+          }
         }
-      });
-      
-      
-      return uniqueTeachers;
+        // Merge teachers from all days, combining their availability
+        const merged = mergeTeachersFromAllDays(teachersByDay);
+        return merged;
+      } else {
+        if (!selectedDate) return [];
+        const response = await getTeachers(selectedDate);
+        const teachersData = response?.data || [];
+
+        // Deduplicate teachers by name to prevent duplicates from API
+        const uniqueTeachers = [];
+        const seenNames = new Set();
+
+        teachersData.forEach(teacher => {
+          if (!seenNames.has(teacher.name)) {
+            seenNames.add(teacher.name);
+            uniqueTeachers.push(teacher);
+          }
+        });
+
+        return uniqueTeachers;
+      }
     },
-    enabled: !!selectedDate,
+    enabled: isAllWeekMode || !!selectedDate,
+    staleTime: 0, // Always fetch fresh data
   });
 
-  // Fetch all students
+  // Fetch all students - in All Week mode, fetch from all days to get complete availability
   const { data: students, error: studentsError, isLoading: studentsLoading } = useQuery({
-    queryKey: ['students', selectedDate],
+    queryKey: ['students-modal', isAllWeekMode ? 'all-week' : selectedDate],
     queryFn: async () => {
-      if (!selectedDate) return [];
-      const response = await getStudents(selectedDate);
-      const studentsData = response?.data || [];
-      
-      // Deduplicate students by name to prevent duplicates from API
-      const uniqueStudents = [];
-      const seenNames = new Set();
-      
-      studentsData.forEach(student => {
-        if (!seenNames.has(student.name)) {
-          seenNames.add(student.name);
-          uniqueStudents.push(student);
+      if (isAllWeekMode) {
+        // Fetch students for all 7 days and merge them (similar to teachers)
+        const studentsByDay = {};
+        for (const day of weekDays) {
+          const date = dayToDate(day);
+          if (date) {
+            const response = await getStudents(date);
+            studentsByDay[day] = response?.data || [];
+          }
         }
-      });
-      
-      return uniqueStudents;
+        // Merge students from all days, combining their availability
+        const mergedMap = new Map();
+        Object.entries(studentsByDay).forEach(([day, dayStudents]) => {
+          dayStudents.forEach(student => {
+            if (!mergedMap.has(student.name)) {
+              mergedMap.set(student.name, {
+                ...student,
+                availabilityByDay: { [day]: student.availability || [] }
+              });
+            } else {
+              const existing = mergedMap.get(student.name);
+              existing.availabilityByDay[day] = student.availability || [];
+            }
+          });
+        });
+        return Array.from(mergedMap.values()).map(student => ({
+          ...student,
+          availability: [...new Set(
+            Object.values(student.availabilityByDay).flat()
+          )]
+        }));
+      } else {
+        if (!selectedDate) return [];
+        const response = await getStudents(selectedDate);
+        const studentsData = response?.data || [];
+
+        // Deduplicate students by name to prevent duplicates from API
+        const uniqueStudents = [];
+        const seenNames = new Set();
+
+        studentsData.forEach(student => {
+          if (!seenNames.has(student.name)) {
+            seenNames.add(student.name);
+            uniqueStudents.push(student);
+          }
+        });
+
+        return uniqueStudents;
+      }
     },
-    enabled: !!selectedDate,
+    enabled: isAllWeekMode || !!selectedDate,
+    staleTime: 0, // Always fetch fresh data
   });
 
   // Fetch all assignments for this date and time slot
@@ -168,27 +247,48 @@ function AssignmentModal({
   }, [allAssignments, allWeekAssignments, timeSlotId, existingAssignment?.id, isAllWeekMode, selectedDays]);
 
   // Get list of all teachers to show - includes available ones + currently selected ones (even if unavailable or deleted)
+  // In All Week mode, show ALL teachers (they may be available on different days)
   const teachersToShow = useMemo(() => {
     if (!teachers) return [];
 
-    const availableTeacherIds = new Set(
-      teachers.filter((t) => t.availability && t.availability.includes(timeSlotId)).map((t) => t.id)
-    );
-
     const selectedTeacherIds = selectedTeachers.map((st) => st.teacher_id);
-    const teachersById = new Map(teachers.map((t) => [t.id, t]));
 
     // Create list of teachers to show (deduplicated by name)
     const teachersToShowMap = new Map(); // Use name as key instead of ID
     const seenTeacherNames = new Set();
 
-    // Add all available teachers
-    teachers.forEach((teacher) => {
-      if (availableTeacherIds.has(teacher.id) && !seenTeacherNames.has(teacher.name)) {
-        teachersToShowMap.set(teacher.name, teacher);
-        seenTeacherNames.add(teacher.name);
+    if (isAllWeekMode) {
+      // In All Week mode, show ALL teachers - they may have availability on different days
+      // Put the auto-selected teacher (clicked row) first
+      if (autoSelectTeacherName) {
+        const autoTeacher = teachers.find(t => t.name === autoSelectTeacherName);
+        if (autoTeacher && !seenTeacherNames.has(autoTeacher.name)) {
+          teachersToShowMap.set(autoTeacher.name, autoTeacher);
+          seenTeacherNames.add(autoTeacher.name);
+        }
       }
-    });
+
+      // Add all other teachers
+      teachers.forEach((teacher) => {
+        if (!seenTeacherNames.has(teacher.name)) {
+          teachersToShowMap.set(teacher.name, teacher);
+          seenTeacherNames.add(teacher.name);
+        }
+      });
+    } else {
+      // Single day mode - filter by availability at this time slot
+      const availableTeacherIds = new Set(
+        teachers.filter((t) => t.availability && t.availability.includes(timeSlotId)).map((t) => t.id)
+      );
+
+      // Add all available teachers
+      teachers.forEach((teacher) => {
+        if (availableTeacherIds.has(teacher.id) && !seenTeacherNames.has(teacher.name)) {
+          teachersToShowMap.set(teacher.name, teacher);
+          seenTeacherNames.add(teacher.name);
+        }
+      });
+    }
 
     // Add all selected teachers (even if deleted or unavailable)
     selectedTeacherIds.forEach((teacherId) => {
@@ -214,60 +314,81 @@ function AssignmentModal({
     });
 
     return Array.from(teachersToShowMap.values());
-  }, [teachers, timeSlotId, selectedTeachers]);
+  }, [teachers, timeSlotId, selectedTeachers, isAllWeekMode, autoSelectTeacherName]);
 
   // Get list of all students to show - includes available ones + currently selected ones (even if unavailable or deleted)
-  // Excludes students who are already scheduled at this time slot (unless they're part of the current assignment)
+  // In All Week mode, show ALL students (they may be available on different days)
   const studentsToShow = useMemo(() => {
     if (!students) return [];
-
-    const availableStudentIds = new Set(
-      students.filter((s) => s.availability && s.availability.includes(timeSlotId)).map((s) => s.id)
-    );
 
     const selectedStudentIds = selectedStudents.map((ss) => ss.student_id);
     const studentsMap = new Map(students.map((s) => [s.id, s]));
 
-    // Create list of students to show
-    const studentsSet = new Map();
+    // Create list of students to show (deduplicated by name)
+    const studentsToShowMap = new Map();
+    const seenStudentNames = new Set();
 
-    // Add all available students, excluding those already scheduled at this time slot
-    students.forEach((student) => {
-      if (availableStudentIds.has(student.id)) {
-        // Skip if student is already scheduled elsewhere at this time (unless selected in current assignment)
-        const isAlreadyScheduled = studentAssignments.has(student.id);
-        const isSelectedInCurrent = selectedStudentIds.includes(student.id);
+    if (isAllWeekMode) {
+      // In All Week mode, show ALL students - they may have availability on different days
+      // Exclude those already scheduled at this time slot (unless selected in current assignment)
+      students.forEach((student) => {
+        if (!seenStudentNames.has(student.name)) {
+          const isAlreadyScheduled = studentAssignments.has(student.id);
+          const isSelectedInCurrent = selectedStudentIds.includes(student.id);
 
-        if (!isAlreadyScheduled || isSelectedInCurrent) {
-          studentsSet.set(student.id, student);
+          if (!isAlreadyScheduled || isSelectedInCurrent) {
+            studentsToShowMap.set(student.name, student);
+            seenStudentNames.add(student.name);
+          }
         }
-      }
-    });
+      });
+    } else {
+      // Single day mode - filter by availability at this time slot
+      const availableStudentIds = new Set(
+        students.filter((s) => s.availability && s.availability.includes(timeSlotId)).map((s) => s.id)
+      );
+
+      // Add all available students, excluding those already scheduled at this time slot
+      students.forEach((student) => {
+        if (availableStudentIds.has(student.id) && !seenStudentNames.has(student.name)) {
+          const isAlreadyScheduled = studentAssignments.has(student.id);
+          const isSelectedInCurrent = selectedStudentIds.includes(student.id);
+
+          if (!isAlreadyScheduled || isSelectedInCurrent) {
+            studentsToShowMap.set(student.name, student);
+            seenStudentNames.add(student.name);
+          }
+        }
+      });
+    }
 
     // Add all selected students (even if deleted or unavailable)
     selectedStudentIds.forEach((studentId) => {
-      if (!studentsSet.has(studentId)) {
-        const student = studentsMap.get(studentId);
-        if (student) {
-          // Student exists but is unavailable or doesn't match color filter
-          studentsSet.set(studentId, student);
-        } else {
-          // Student was deleted - create a placeholder
-          studentsSet.set(studentId, {
+      const student = studentsMap.get(studentId);
+      if (student && !seenStudentNames.has(student.name)) {
+        // Student exists but is unavailable or doesn't match color filter
+        studentsToShowMap.set(student.name, student);
+        seenStudentNames.add(student.name);
+      } else if (!student) {
+        // Student was deleted - create a placeholder
+        const deletedName = `[DELETED STUDENT - ID: ${studentId}]`;
+        if (!seenStudentNames.has(deletedName)) {
+          studentsToShowMap.set(deletedName, {
             id: studentId,
-            name: `[DELETED STUDENT - ID: ${studentId}]`,
+            name: deletedName,
             english_name: null,
             availability: [],
             color_keyword: null,
             weakness_level: null,
             isDeleted: true,
           });
+          seenStudentNames.add(deletedName);
         }
       }
     });
 
-    return Array.from(studentsSet.values());
-  }, [students, timeSlotId, selectedStudents, studentAssignments]);
+    return Array.from(studentsToShowMap.values());
+  }, [students, timeSlotId, selectedStudents, studentAssignments, isAllWeekMode]);
 
   // Initialize form with existing assignment data
   useEffect(() => {
@@ -312,12 +433,16 @@ function AssignmentModal({
     if (!existingAssignment && autoSelectTeacherName && teachers && teachers.length > 0) {
       // Find the teacher by name
       const teacher = teachers.find(t => t.name === autoSelectTeacherName);
-      if (teacher && teacher.availability && teacher.availability.includes(timeSlotId)) {
-        // Auto-select the teacher if they are available at this time slot
-        setSelectedTeachers([{ teacher_id: teacher.id, is_substitute: false }]);
+      if (teacher) {
+        // In All Week mode, auto-select the teacher regardless of availability
+        // (the grid showed them as available, so they must be available on some day)
+        // In single day mode, check availability
+        if (isAllWeekMode || (teacher.availability && teacher.availability.includes(timeSlotId))) {
+          setSelectedTeachers([{ teacher_id: teacher.id, is_substitute: false }]);
+        }
       }
     }
-  }, [existingAssignment, autoSelectTeacherName, teachers, timeSlotId]);
+  }, [existingAssignment, autoSelectTeacherName, teachers, timeSlotId, isAllWeekMode]);
 
   // Mutations
   const createMutation = useMutation({
