@@ -435,38 +435,15 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                             </div>
                           ))}
 
-                          {/* Also show FREE days for this teacher at this time slot */}
-                          {isAllWeekMode && (() => {
-                            // Show the component unconditionally for debugging
-                            const allFreeDays = weekDays.filter(day => {
-                              const availability = teacherAvailabilityByDay[teacherName]?.[day] || [];
-                              return availability.some(a => a == slot.id);
-                            });
-                            const classDays = group?.classes?.flatMap(c => c.days) || [];
-                            const freeDays = allFreeDays.filter(day => !classDays.includes(day));
-
-                            return (
-                              <div className="bg-gradient-to-br from-green-50 to-green-100 border border-green-300 rounded-lg p-2 text-center">
-                                <div className="text-green-700 font-bold text-sm mb-1">
-                                  Also FREE:
-                                </div>
-                                <div className="flex flex-wrap gap-1 justify-center">
-                                  {freeDays.map(day => (
-                                    <span
-                                      key={day}
-                                      className="px-2 py-1 bg-green-500 text-white rounded text-xs font-bold"
-                                      title={`Available on ${day}`}
-                                    >
-                                      {dayAbbrev[day]}
-                                    </span>
-                                  ))}
-                                </div>
-                                {freeDays.length === 0 && (
-                                  <div className="text-red-500 text-xs mt-1">No free days found</div>
-                                )}
-                              </div>
-                            );
-                          })()}
+                          {/* TEST - Always show this box for debugging */}
+                          <div className="bg-yellow-100 border-2 border-yellow-400 rounded-lg p-2 text-center mt-2">
+                            <div className="text-yellow-800 font-bold text-sm">
+                              TEST BOX - isAllWeekMode: {String(isAllWeekMode)}
+                            </div>
+                            <div className="text-xs text-gray-600 mt-1">
+                              Teacher: {teacherName}, Slot: {slot.name}
+                            </div>
+                          </div>
                         </div>
                       )}
                     </td>
