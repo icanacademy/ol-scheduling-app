@@ -113,8 +113,10 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
       });
     });
 
-    // Debug: Log T.AJ's availability
-    console.log('teacherAvailabilityByDay for T.AJ:', lookup['T.AJ']);
+    // Debug: Log first teacher's availability
+    const firstTeacher = Object.keys(lookup)[0];
+    console.log('=== DEBUG: First teacher:', firstTeacher);
+    console.log('=== DEBUG: teacherAvailabilityByDay:', lookup);
 
     return lookup;
   }, [isAllWeekMode, teachers]);
