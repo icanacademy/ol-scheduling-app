@@ -267,6 +267,72 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     }
   };
 
+  // Apply availability to all days of the week
+  const [applyingToAllDays, setApplyingToAllDays] = useState(null); // Tracks which teacher is being processed
+
+  const handleApplyToAllDays = async (teacher) => {
+    const availability = teacher.availability || [];
+    const colorKeyword = teacher.color_keyword;
+    const teacherName = teacher.name;
+
+    if (availability.length === 0) {
+      const proceed = confirm(
+        `${teacherName} has no availability set for ${selectedDay}.\n\nDo you want to clear their availability for all days?`
+      );
+      if (!proceed) return;
+    } else {
+      const proceed = confirm(
+        `Apply ${teacherName}'s availability (${availability.length} time slots) to all days (Mon-Sun)?`
+      );
+      if (!proceed) return;
+    }
+
+    setApplyingToAllDays(teacher.id);
+
+    try {
+      for (const day of weekDays) {
+        const targetDate = dayToDate(day);
+        if (!targetDate) continue;
+
+        // Get existing teachers for this date
+        const existingTeachersResponse = await getTeachers(targetDate);
+        const existingTeachers = existingTeachersResponse.data || [];
+
+        // Find if teacher already exists for this date
+        const existingTeacher = existingTeachers.find(
+          t => t.name.toLowerCase() === teacherName.toLowerCase()
+        );
+
+        if (existingTeacher) {
+          // Update existing teacher's availability
+          await updateTeacher(existingTeacher.id, {
+            name: existingTeacher.name,
+            availability: availability,
+            color_keyword: colorKeyword,
+          });
+        } else {
+          // Create new teacher record for this date
+          await createTeacher({
+            name: teacherName,
+            availability: availability,
+            color_keyword: colorKeyword,
+            date: targetDate,
+          });
+        }
+      }
+
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries(['teachers']);
+
+      alert(`Successfully applied ${teacherName}'s availability to all days!`);
+    } catch (error) {
+      console.error('Failed to apply availability to all days:', error);
+      alert('Failed to apply availability to all days: ' + (error.response?.data?.message || error.message));
+    } finally {
+      setApplyingToAllDays(null);
+    }
+  };
+
   // Drag selection handlers
   const getCellKey = (teacherId, timeSlotId) => `${teacherId}-${timeSlotId}`;
 
@@ -1135,6 +1201,16 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                                   Copy
                                 </button>
                               )}
+
+                              {/* Apply to All Days Button */}
+                              <button
+                                onClick={() => handleApplyToAllDays(teacher)}
+                                disabled={applyingToAllDays === teacher.id}
+                                className="px-2 py-0.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-wait"
+                                title="Apply this schedule to all days (Mon-Sun)"
+                              >
+                                {applyingToAllDays === teacher.id ? '...' : 'All Days'}
+                              </button>
                             </div>
                           )}
 
