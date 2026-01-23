@@ -267,30 +267,35 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     }
   };
 
-  // Apply availability to all days of the week
-  const [applyingToAllDays, setApplyingToAllDays] = useState(null); // Tracks which teacher is being processed
+  // Apply availability to selected days
+  const [applyingToDays, setApplyingToDays] = useState(null); // Tracks which teacher is being processed
+  const [selectedDaysPerTeacher, setSelectedDaysPerTeacher] = useState({}); // { teacherId: ['Monday', 'Tuesday', ...] }
 
-  const handleApplyToAllDays = async (teacher) => {
+  const toggleDayForTeacher = (teacherId, day) => {
+    setSelectedDaysPerTeacher(prev => {
+      const currentDays = prev[teacherId] || [];
+      const newDays = currentDays.includes(day)
+        ? currentDays.filter(d => d !== day)
+        : [...currentDays, day];
+      return { ...prev, [teacherId]: newDays };
+    });
+  };
+
+  const handleApplyToSelectedDays = async (teacher) => {
+    const selectedDays = selectedDaysPerTeacher[teacher.id] || [];
+    if (selectedDays.length === 0) {
+      alert('Please select at least one day to apply the schedule to.');
+      return;
+    }
+
     const availability = teacher.availability || [];
     const colorKeyword = teacher.color_keyword;
     const teacherName = teacher.name;
 
-    if (availability.length === 0) {
-      const proceed = confirm(
-        `${teacherName} has no availability set for ${selectedDay}.\n\nDo you want to clear their availability for all days?`
-      );
-      if (!proceed) return;
-    } else {
-      const proceed = confirm(
-        `Apply ${teacherName}'s availability (${availability.length} time slots) to all days (Mon-Sun)?`
-      );
-      if (!proceed) return;
-    }
-
-    setApplyingToAllDays(teacher.id);
+    setApplyingToDays(teacher.id);
 
     try {
-      for (const day of weekDays) {
+      for (const day of selectedDays) {
         const targetDate = dayToDate(day);
         if (!targetDate) continue;
 
@@ -324,12 +329,15 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       // Invalidate queries to refresh data
       queryClient.invalidateQueries(['teachers']);
 
-      alert(`Successfully applied ${teacherName}'s availability to all days!`);
+      // Clear selected days for this teacher
+      setSelectedDaysPerTeacher(prev => ({ ...prev, [teacher.id]: [] }));
+
+      alert(`Applied to ${selectedDays.length} day(s)!`);
     } catch (error) {
-      console.error('Failed to apply availability to all days:', error);
-      alert('Failed to apply availability to all days: ' + (error.response?.data?.message || error.message));
+      console.error('Failed to apply availability:', error);
+      alert('Failed to apply: ' + (error.response?.data?.message || error.message));
     } finally {
-      setApplyingToAllDays(null);
+      setApplyingToDays(null);
     }
   };
 
@@ -1168,28 +1176,45 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                           </td>
                         );
                       })}
-                      <td className="border border-gray-300 px-2 py-2 text-center sticky right-0 bg-white hover:bg-gray-50 z-10 min-w-[200px]">
+                      <td className="border border-gray-300 px-2 py-2 text-center sticky right-0 bg-white hover:bg-gray-50 z-10 min-w-[280px]">
                         <div className="flex flex-col gap-1">
-                          {/* Quick Actions Row */}
+                          {/* Apply to Days Row */}
                           {!isAllWeekMode && (
-                            <div className="flex items-center justify-center gap-1">
-                              {/* Preset Dropdown */}
-                              <select
-                                className="px-1 py-0.5 text-xs border border-gray-300 rounded focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                value=""
-                                onChange={(e) => {
-                                  const preset = presetTemplates.find(p => p.name === e.target.value);
-                                  if (preset) {
-                                    applyPresetToTeacher(teacher, preset.ids);
-                                  }
-                                  e.target.value = '';
-                                }}
-                              >
-                                <option value="">Preset...</option>
-                                {presetTemplates.map(preset => (
-                                  <option key={preset.name} value={preset.name}>{preset.name}</option>
-                                ))}
-                              </select>
+                            <div className="flex flex-col gap-1">
+                              {/* Day selector buttons */}
+                              <div className="flex items-center justify-center gap-0.5">
+                                <span className="text-xs text-gray-500 mr-1">Apply to:</span>
+                                {weekDays.map(day => {
+                                  const isSelected = (selectedDaysPerTeacher[teacher.id] || []).includes(day);
+                                  const isCurrentDay = day === selectedDay;
+                                  return (
+                                    <button
+                                      key={day}
+                                      onClick={() => toggleDayForTeacher(teacher.id, day)}
+                                      disabled={isCurrentDay}
+                                      className={`w-6 h-6 text-xs font-medium rounded transition-colors ${
+                                        isCurrentDay
+                                          ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                          : isSelected
+                                            ? 'bg-purple-500 text-white'
+                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                                      }`}
+                                      title={isCurrentDay ? `${day} (current)` : day}
+                                    >
+                                      {day.charAt(0)}
+                                    </button>
+                                  );
+                                })}
+                                {/* Apply button */}
+                                <button
+                                  onClick={() => handleApplyToSelectedDays(teacher)}
+                                  disabled={applyingToDays === teacher.id || !(selectedDaysPerTeacher[teacher.id]?.length > 0)}
+                                  className="ml-1 px-2 py-0.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                  title="Apply schedule to selected days"
+                                >
+                                  {applyingToDays === teacher.id ? '...' : 'Go'}
+                                </button>
+                              </div>
 
                               {/* Copy Button */}
                               {copyFromTeacherId && copyFromTeacherId !== String(teacher.id) && (
@@ -1198,19 +1223,9 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                                   className="px-2 py-0.5 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
                                   title={`Copy schedule from ${teachers.find(t => t.id === parseInt(copyFromTeacherId))?.name || 'selected teacher'}`}
                                 >
-                                  Copy
+                                  Copy from {teachers.find(t => t.id === parseInt(copyFromTeacherId))?.name}
                                 </button>
                               )}
-
-                              {/* Apply to All Days Button */}
-                              <button
-                                onClick={() => handleApplyToAllDays(teacher)}
-                                disabled={applyingToAllDays === teacher.id}
-                                className="px-2 py-0.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-wait"
-                                title="Apply this schedule to all days (Mon-Sun)"
-                              >
-                                {applyingToAllDays === teacher.id ? '...' : 'All Days'}
-                              </button>
                             </div>
                           )}
 
