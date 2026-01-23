@@ -270,6 +270,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   // Apply availability to selected days
   const [applyingToDays, setApplyingToDays] = useState(null); // Tracks which teacher is being processed
   const [selectedDaysPerTeacher, setSelectedDaysPerTeacher] = useState({}); // { teacherId: ['Monday', 'Tuesday', ...] }
+  const [selectedSlotsForCopy, setSelectedSlotsForCopy] = useState({}); // { teacherId: [slotId1, slotId2, ...] }
 
   const toggleDayForTeacher = (teacherId, day) => {
     setSelectedDaysPerTeacher(prev => {
@@ -281,14 +282,36 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     });
   };
 
+  // Toggle slot selection for copying (Ctrl+Click)
+  const toggleSlotForCopy = (teacherId, slotId) => {
+    setSelectedSlotsForCopy(prev => {
+      const currentSlots = prev[teacherId] || [];
+      const newSlots = currentSlots.includes(slotId)
+        ? currentSlots.filter(s => s !== slotId)
+        : [...currentSlots, slotId];
+      return { ...prev, [teacherId]: newSlots };
+    });
+  };
+
+  // Clear selected slots for a teacher
+  const clearSelectedSlots = (teacherId) => {
+    setSelectedSlotsForCopy(prev => ({ ...prev, [teacherId]: [] }));
+  };
+
   const handleApplyToSelectedDays = async (teacher) => {
     const selectedDays = selectedDaysPerTeacher[teacher.id] || [];
+    const selectedSlots = selectedSlotsForCopy[teacher.id] || [];
+
     if (selectedDays.length === 0) {
-      alert('Please select at least one day to apply the schedule to.');
+      alert('Please select at least one day to apply to.');
       return;
     }
 
-    const availability = teacher.availability || [];
+    if (selectedSlots.length === 0) {
+      alert('Please Ctrl+Click (Cmd+Click on Mac) on time slots to select which hours to copy.');
+      return;
+    }
+
     const colorKeyword = teacher.color_keyword;
     const teacherName = teacher.name;
 
@@ -309,17 +332,20 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
         );
 
         if (existingTeacher) {
-          // Update existing teacher's availability
+          // Merge: add selected slots to existing availability
+          const existingAvailability = existingTeacher.availability || [];
+          const mergedAvailability = [...new Set([...existingAvailability, ...selectedSlots])].sort((a, b) => a - b);
+
           await updateTeacher(existingTeacher.id, {
             name: existingTeacher.name,
-            availability: availability,
+            availability: mergedAvailability,
             color_keyword: colorKeyword,
           });
         } else {
-          // Create new teacher record for this date
+          // Create new teacher record for this date with selected slots
           await createTeacher({
             name: teacherName,
-            availability: availability,
+            availability: selectedSlots.sort((a, b) => a - b),
             color_keyword: colorKeyword,
             date: targetDate,
           });
@@ -329,10 +355,11 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       // Invalidate queries to refresh data
       queryClient.invalidateQueries(['teachers']);
 
-      // Clear selected days for this teacher
+      // Clear selections for this teacher
       setSelectedDaysPerTeacher(prev => ({ ...prev, [teacher.id]: [] }));
+      setSelectedSlotsForCopy(prev => ({ ...prev, [teacher.id]: [] }));
 
-      alert(`Applied to ${selectedDays.length} day(s)!`);
+      alert(`Added ${selectedSlots.length} time slot(s) to ${selectedDays.length} day(s)!`);
     } catch (error) {
       console.error('Failed to apply availability:', error);
       alert('Failed to apply: ' + (error.response?.data?.message || error.message));
@@ -347,6 +374,16 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   const handleDragStart = (teacher, timeSlotId, e) => {
     if (isAllWeekMode) return;
     e.preventDefault();
+
+    // Check if Ctrl (Windows) or Cmd (Mac) is held - select for copying
+    if (e.ctrlKey || e.metaKey) {
+      // Only allow selecting available time slots for copying
+      const isAvailable = teacher.availability?.includes(timeSlotId);
+      if (isAvailable) {
+        toggleSlotForCopy(teacher.id, timeSlotId);
+      }
+      return;
+    }
 
     const isCurrentlyAvailable = teacher.availability?.includes(timeSlotId);
     const mode = isCurrentlyAvailable ? 'remove' : 'add';
@@ -1123,17 +1160,25 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                         const isAvailable = teacher.availability?.includes(slot.id);
                         const classInfo = getTeacherClassInfo(teacher.name, slot.id);
                         const isSelected = isCellSelected(teacher.id, slot.id);
+                        const isSelectedForCopy = (selectedSlotsForCopy[teacher.id] || []).includes(slot.id);
 
                         // Determine cell styling based on availability and class assignment
                         let cellStyle = { backgroundColor: bgColor };
                         let cellContent = null;
                         let titleText = 'Not available - Click/drag to add';
+                        let cellBorder = '';
+
+                        // Add blue border if selected for copying
+                        if (isSelectedForCopy) {
+                          cellBorder = '3px solid #3b82f6'; // blue border
+                        }
 
                         if (classInfo.hasClass) {
                           // Teacher has a class - show with bright red background
                           cellStyle = {
                             backgroundColor: '#dc2626', // bright red for classes
-                            color: 'white'
+                            color: 'white',
+                            border: cellBorder || undefined
                           };
                           cellContent = (
                             <div className="text-white text-xs font-bold">
@@ -1145,12 +1190,17 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                           // Teacher is available but no class assigned - show with green background
                           cellStyle = {
                             backgroundColor: '#16a34a', // bright green for available
-                            color: 'white'
+                            color: 'white',
+                            border: cellBorder || undefined
                           };
                           cellContent = (
-                            <div className="text-white text-xs font-bold">✓</div>
+                            <div className="text-white text-xs font-bold">
+                              {isSelectedForCopy ? '★' : '✓'}
+                            </div>
                           );
-                          titleText = 'Available - Click/drag to remove';
+                          titleText = isSelectedForCopy
+                            ? 'Selected for copying (Ctrl+Click to deselect)'
+                            : 'Available - Click/drag to remove, Ctrl+Click to select for copying';
                         }
 
                         // Add selection highlight
@@ -1181,9 +1231,25 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                           {/* Apply to Days Row */}
                           {!isAllWeekMode && (
                             <div className="flex flex-col gap-1">
+                              {/* Selected slots indicator */}
+                              {(selectedSlotsForCopy[teacher.id]?.length > 0) && (
+                                <div className="flex items-center justify-center gap-1 text-xs">
+                                  <span className="text-blue-600 font-medium">
+                                    {selectedSlotsForCopy[teacher.id].length} slot(s) selected
+                                  </span>
+                                  <button
+                                    onClick={() => clearSelectedSlots(teacher.id)}
+                                    className="text-gray-400 hover:text-red-500"
+                                    title="Clear selection"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              )}
+
                               {/* Day selector buttons */}
                               <div className="flex items-center justify-center gap-0.5">
-                                <span className="text-xs text-gray-500 mr-1">Apply to:</span>
+                                <span className="text-xs text-gray-500 mr-1">Days:</span>
                                 {weekDays.map(day => {
                                   const isSelected = (selectedDaysPerTeacher[teacher.id] || []).includes(day);
                                   const isCurrentDay = day === selectedDay;
@@ -1208,13 +1274,26 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
                                 {/* Apply button */}
                                 <button
                                   onClick={() => handleApplyToSelectedDays(teacher)}
-                                  disabled={applyingToDays === teacher.id || !(selectedDaysPerTeacher[teacher.id]?.length > 0)}
+                                  disabled={applyingToDays === teacher.id || !(selectedDaysPerTeacher[teacher.id]?.length > 0) || !(selectedSlotsForCopy[teacher.id]?.length > 0)}
                                   className="ml-1 px-2 py-0.5 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                  title="Apply schedule to selected days"
+                                  title={
+                                    !(selectedSlotsForCopy[teacher.id]?.length > 0)
+                                      ? 'Ctrl+Click time slots first to select them'
+                                      : !(selectedDaysPerTeacher[teacher.id]?.length > 0)
+                                        ? 'Select days to apply to'
+                                        : 'Apply selected slots to selected days'
+                                  }
                                 >
-                                  {applyingToDays === teacher.id ? '...' : 'Go'}
+                                  {applyingToDays === teacher.id ? '...' : 'Apply'}
                                 </button>
                               </div>
+
+                              {/* Help text when no slots selected */}
+                              {!(selectedSlotsForCopy[teacher.id]?.length > 0) && (
+                                <div className="text-[10px] text-gray-400">
+                                  Ctrl+Click slots to select
+                                </div>
+                              )}
 
                               {/* Copy Button */}
                               {copyFromTeacherId && copyFromTeacherId !== String(teacher.id) && (
