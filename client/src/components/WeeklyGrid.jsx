@@ -1,7 +1,12 @@
-import { useMemo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { deleteAssignment } from '../services/api';
 import { weekDays, dayToDate, dateToDay } from '../utils/dayMapping';
+import DraggableClassCard from './DraggableClassCard';
+import DroppableCell from './DroppableCell';
+import DragOverlayContent from './DragOverlayContent';
+import { useDragDropAssignment } from '../hooks/useDragDropAssignment';
 
 // Online Scheduler - Weekly Grid Component
 // Shows weekly schedule with "Also FREE" feature for teachers
@@ -130,6 +135,37 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
     }
     return map;
   }, [isAllWeekMode, teachers]);
+
+  // Configure drag sensors with activation constraints
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px movement before drag starts (prevents accidental drags)
+      },
+    })
+  );
+
+  // Initialize drag-drop hook
+  const {
+    activeItem,
+    validDropTargets,
+    isDragging,
+    isUpdating,
+    handleDragStart,
+    handleDragOver,
+    handleDragEnd,
+    handleDragCancel,
+  } = useDragDropAssignment(teacherAvailabilityByDay, isAllWeekMode ? teachers : null);
+
+  // Wrap drag handlers to include required context
+  const onDragStart = useCallback((event) => {
+    handleDragStart(event, allTeachers, timeSlots);
+  }, [handleDragStart, allTeachers, timeSlots]);
+
+  // Check if a cell is a valid drop target
+  const isValidTarget = useCallback((teacherName, timeSlotId) => {
+    return validDropTargets.has(`cell-${teacherName}-${timeSlotId}`);
+  }, [validDropTargets]);
 
   // Helper function to check if a teacher is available at a given time slot (single day mode)
   const isTeacherAvailable = (teacherName, timeSlotId) => {
@@ -278,8 +314,34 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
         .shadow-b {
           box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
+        .dragging-active {
+          user-select: none;
+        }
       `}</style>
-      <div className="overflow-x-auto max-h-[calc(100vh-300px)] overflow-y-auto">
+
+      {/* Loading overlay during updates */}
+      {isUpdating && (
+        <div className="fixed inset-0 bg-white bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl border-2 border-blue-500">
+            <div className="text-lg font-semibold text-blue-600 flex items-center gap-3">
+              <svg className="animate-spin h-5 w-5 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Moving class...
+            </div>
+          </div>
+        </div>
+      )}
+
+      <DndContext
+        sensors={sensors}
+        onDragStart={onDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
+      >
+        <div className={`overflow-x-auto max-h-[calc(100vh-300px)] overflow-y-auto ${isDragging ? 'dragging-active' : ''}`}>
         <table className="w-full border-collapse">
         <thead>
           <tr className="bg-gray-200">
@@ -322,13 +384,17 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                 {timeSlots.map((slot) => {
                   const key = `${teacherName}-${slot.id}`;
                   const group = groupedAssignments[key];
-                  
+
                   return (
-                    <td
+                    <DroppableCell
                       key={slot.id}
+                      teacherName={teacherName}
+                      timeSlotId={slot.id}
+                      isValidDropTarget={isValidTarget(teacherName, slot.id)}
+                      isDragging={isDragging}
                       className="border border-gray-300 p-3 cursor-pointer hover:bg-gray-50 align-top"
                       onClick={() => {
-                        if (onCellClick) {
+                        if (onCellClick && !isDragging) {
                           onCellClick(slot.id, teacherName, group);
                         }
                       }}
@@ -398,43 +464,51 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                         <div className="space-y-3">
                           {/* Show each different class */}
                           {group.classes.map((classGroup, idx) => (
-                            <div key={idx} className={`border border-white border-opacity-50 rounded-lg p-2 shadow-md ${getContainerColor(classGroup)} relative group`}>
-                              {/* Delete button */}
-                              {classGroup.assignments && classGroup.assignments.length > 0 && (
-                                <button
-                                  onClick={(e) => handleDeleteClassGroup(e, classGroup)}
-                                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center text-sm font-bold shadow-md z-10"
-                                  title="Delete this class"
-                                >
-                                  ×
-                                </button>
-                              )}
+                            <DraggableClassCard
+                              key={idx}
+                              classGroup={classGroup}
+                              teacherName={teacherName}
+                              timeSlotId={slot.id}
+                              groupIndex={idx}
+                            >
+                              <div className={`border border-white border-opacity-50 rounded-lg p-2 shadow-md ${getContainerColor(classGroup)} relative group`}>
+                                {/* Delete button */}
+                                {classGroup.assignments && classGroup.assignments.length > 0 && !isDragging && (
+                                  <button
+                                    onClick={(e) => handleDeleteClassGroup(e, classGroup)}
+                                    className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center text-sm font-bold shadow-md z-10"
+                                    title="Delete this class"
+                                  >
+                                    ×
+                                  </button>
+                                )}
 
-                              {/* Day indicator */}
-                              <div className={`inline-block px-2 py-1 rounded-full text-xs font-medium mb-2 ${getDayColor(classGroup.days)}`}>
-                                {formatDays(classGroup.days)}
+                                {/* Day indicator */}
+                                <div className={`inline-block px-2 py-1 rounded-full text-xs font-medium mb-2 ${getDayColor(classGroup.days)}`}>
+                                  {formatDays(classGroup.days)}
+                                </div>
+
+                                {/* Subject */}
+                                {classGroup.subject && (
+                                  <div className={`text-xs font-semibold ${getSubjectColor(classGroup)} mb-1`}>
+                                    {classGroup.subject}
+                                  </div>
+                                )}
+
+                                {/* Students */}
+                                {classGroup.students.length > 0 && (
+                                  <div className="text-xs">
+                                    <div className="font-medium text-gray-700 mb-1">
+                                      {classGroup.students.length} student{classGroup.students.length !== 1 ? 's' : ''}:
+                                    </div>
+                                    <div className="text-gray-600">
+                                      {classGroup.students.slice(0, 3).map(s => s.name).join(', ')}
+                                      {classGroup.students.length > 3 && ` +${classGroup.students.length - 3}`}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
-
-                              {/* Subject */}
-                              {classGroup.subject && (
-                                <div className={`text-xs font-semibold ${getSubjectColor(classGroup)} mb-1`}>
-                                  {classGroup.subject}
-                                </div>
-                              )}
-
-                              {/* Students */}
-                              {classGroup.students.length > 0 && (
-                                <div className="text-xs">
-                                  <div className="font-medium text-gray-700 mb-1">
-                                    {classGroup.students.length} student{classGroup.students.length !== 1 ? 's' : ''}:
-                                  </div>
-                                  <div className="text-gray-600">
-                                    {classGroup.students.slice(0, 3).map(s => s.name).join(', ')}
-                                    {classGroup.students.length > 3 && ` +${classGroup.students.length - 3}`}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
+                            </DraggableClassCard>
                           ))}
 
                           {/* Also show FREE days for this teacher at this time slot */}
@@ -469,7 +543,7 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
                           })()}
                         </div>
                       )}
-                    </td>
+                    </DroppableCell>
                   );
                 })}
               </tr>
@@ -478,6 +552,14 @@ function WeeklyGrid({ timeSlots, assignments, teachers, students, onCellClick, o
         </tbody>
       </table>
     </div>
+
+        {/* Drag Overlay - follows cursor during drag */}
+        <DragOverlay>
+          {activeItem ? (
+            <DragOverlayContent classGroup={activeItem.classGroup} />
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </>
   );
 }
