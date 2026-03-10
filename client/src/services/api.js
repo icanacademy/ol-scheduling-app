@@ -40,7 +40,7 @@ export const getRooms = () => api.get('/rooms');
 
 // Assignments
 export const getAssignments = (date) => api.get('/assignments', { params: { date } });
-export const getAssignmentsByDateRange = (startDate, daysCount) => api.get('/assignments/date-range', { params: { startDate, daysCount } });
+export const getAssignmentsByDateRange = (days) => api.get('/assignments/date-range', { params: { days: Array.isArray(days) ? days.join(',') : days } });
 export const getAssignmentsByStudentId = (studentId) => api.get(`/assignments/student/${studentId}`);
 export const createAssignment = (data) => api.post('/assignments', data);
 export const updateAssignment = (id, data) => api.put(`/assignments/${id}`, data);

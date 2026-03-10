@@ -41,14 +41,25 @@ export const getAssignmentsByStudentId = async (req, res) => {
 
 export const getAssignmentsByDateRange = async (req, res) => {
   try {
-    const { startDate, daysCount } = req.query;
-    if (!startDate || !daysCount) {
-      return res.status(400).json({ error: 'startDate and daysCount are required' });
+    const { days, startDate, daysCount } = req.query;
+
+    // Support new format: comma-separated day names
+    if (days) {
+      const dayNames = days.split(',').map(d => d.trim());
+      const assignments = await Assignment.getByDays(dayNames);
+      return res.json(assignments);
     }
-    const assignments = await Assignment.getByDateRange(startDate, parseInt(daysCount));
-    res.json(assignments);
+
+    // Backward compat: convert old startDate/daysCount to day names
+    if (startDate && daysCount) {
+      const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+      const assignments = await Assignment.getByDays(ALL_DAYS);
+      return res.json(assignments);
+    }
+
+    return res.status(400).json({ error: 'days parameter is required (comma-separated day names)' });
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch assignments by date range', message: error.message });
+    res.status(500).json({ error: 'Failed to fetch assignments by days', message: error.message });
   }
 };
 
@@ -131,11 +142,11 @@ export const copyDay = async (req, res) => {
     const { sourceDate, targetDate } = req.body;
 
     if (!sourceDate || !targetDate) {
-      return res.status(400).json({ error: 'sourceDate and targetDate are required' });
+      return res.status(400).json({ error: 'sourceDate and targetDate are required (day names like "Monday")' });
     }
 
     if (sourceDate === targetDate) {
-      return res.status(400).json({ error: 'Source and target dates cannot be the same' });
+      return res.status(400).json({ error: 'Source and target days cannot be the same' });
     }
 
     // Import Teacher and Student models
@@ -144,11 +155,11 @@ export const copyDay = async (req, res) => {
 
     console.log(`\n=== Copying from ${sourceDate} to ${targetDate} ===`);
 
-    // Delete existing teachers, students, and assignments on target date first
+    // Delete existing teachers, students, and assignments on target day first
     console.log(`Clearing existing data on ${targetDate}...`);
 
     // Delete assignments first (due to foreign key constraints)
-    const deletedAssignments = await Assignment.deleteByDateRange(targetDate, 1);
+    const deletedAssignments = await Assignment.deleteByDays([targetDate]);
     console.log(`  Deleted ${deletedAssignments.count} existing assignment(s)`);
 
     // Delete teachers
@@ -165,7 +176,7 @@ export const copyDay = async (req, res) => {
     }
     console.log(`  Deleted ${existingStudents.length} existing student(s)`);
 
-    // Copy teachers from source date to target date
+    // Copy teachers from source day to target day
     const teachersMap = new Map();
     const sourceTeachers = await Teacher.getAll(sourceDate);
     console.log(`Found ${sourceTeachers.length} teacher(s) on ${sourceDate}`);
@@ -181,7 +192,7 @@ export const copyDay = async (req, res) => {
       console.log(`  Copied teacher: ${teacher.name} (${teacher.id} -> ${newTeacher.id})`);
     }
 
-    // Copy students from source date to target date
+    // Copy students from source day to target day
     const studentsMap = new Map();
     const sourceStudents = await Student.getAll(sourceDate);
     console.log(`Found ${sourceStudents.length} student(s) on ${sourceDate}`);
@@ -200,11 +211,11 @@ export const copyDay = async (req, res) => {
       console.log(`  Copied student: ${student.name} (${student.id} -> ${newStudent.id})`);
     }
 
-    // Get all assignments for the source date
+    // Get all assignments for the source day
     const sourceAssignments = await Assignment.getByDate(sourceDate);
     console.log(`Found ${sourceAssignments.length} assignment(s) on ${sourceDate}`);
 
-    // Copy each assignment to the target date with mapped teacher and student IDs
+    // Copy each assignment to the target day with mapped teacher and student IDs
     const copiedAssignments = [];
     for (const assignment of sourceAssignments) {
       console.log(`\nProcessing assignment ID ${assignment.id}:`);
@@ -231,9 +242,9 @@ export const copyDay = async (req, res) => {
       if (newAssignmentData.teachers.length > 0 || newAssignmentData.students.length > 0) {
         const newAssignment = await Assignment.create(newAssignmentData);
         copiedAssignments.push(newAssignment);
-        console.log(`  ✓ Created assignment ID ${newAssignment.id}`);
+        console.log(`  Created assignment ID ${newAssignment.id}`);
       } else {
-        console.log(`  ✗ Skipped - no valid teacher/student mappings`);
+        console.log(`  Skipped - no valid teacher/student mappings`);
       }
     }
 
@@ -290,139 +301,54 @@ export const removeDuplicates = async (req, res) => {
 
 export const copyWeek = async (req, res) => {
   try {
-    const { sourceDate, targetDate } = req.body;
+    // copyWeek now copies all 7 day names. sourceDate/targetDate are ignored
+    // since day names are the same ("Monday" -> "Monday"). This is effectively
+    // a no-op for the template week model, but kept for API compatibility.
+    // In practice, this duplicates teachers/students within the same day names.
 
-    if (!sourceDate || !targetDate) {
-      return res.status(400).json({ error: 'sourceDate and targetDate are required' });
-    }
+    const ALL_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
     // Import Teacher and Student models
     const Teacher = (await import('../models/Teacher.js')).default;
     const Student = (await import('../models/Student.js')).default;
 
-    // Helper function to add days to a date string (YYYY-MM-DD)
-    const addDays = (dateStr, days) => {
-      const [year, month, day] = dateStr.split('-').map(Number);
-      const date = new Date(Date.UTC(year, month - 1, day));
-      date.setUTCDate(date.getUTCDate() + days);
-      return date.toISOString().split('T')[0];
-    };
-
-    // Calculate day difference
-    const [sourceYear, sourceMonth, sourceDay] = sourceDate.split('-').map(Number);
-    const [targetYear, targetMonth, targetDay] = targetDate.split('-').map(Number);
-    const sourceTime = Date.UTC(sourceYear, sourceMonth - 1, sourceDay);
-    const targetTime = Date.UTC(targetYear, targetMonth - 1, targetDay);
-    const dayDiff = Math.round((targetTime - sourceTime) / (1000 * 60 * 60 * 24));
-
-    // Copy teachers for the source week to target week
+    // Copy teachers for each day (duplicate within same day name)
     const teachersMap = new Map();
-    console.log(`Starting to copy teachers for 7 days from ${sourceDate} to ${targetDate}`);
-    for (let i = 0; i < 7; i++) {
-      const sourceDateStr = addDays(sourceDate, i);
-      const targetDateStr = addDays(targetDate, i);
-
-      const sourceTeachers = await Teacher.getAll(sourceDateStr);
-      console.log(`Day ${i}: Found ${sourceTeachers.length} teacher(s) on ${sourceDateStr}`);
+    console.log(`Starting to copy teachers for all 7 days`);
+    for (const day of ALL_DAYS) {
+      const sourceTeachers = await Teacher.getAll(day);
+      console.log(`${day}: Found ${sourceTeachers.length} teacher(s)`);
       for (const teacher of sourceTeachers) {
-        const newTeacher = await Teacher.create({
-          name: teacher.name,
-          availability: teacher.availability,
-          color_keyword: teacher.color_keyword,
-          date: targetDateStr
-        });
-        // Map old teacher ID to new teacher ID for this date
-        teachersMap.set(`${sourceDateStr}-${teacher.id}`, newTeacher.id);
+        // Since source and target day are the same, just map ID to itself
+        teachersMap.set(`${day}-${teacher.id}`, teacher.id);
       }
     }
-    console.log(`Total teachers copied: ${teachersMap.size}`);
+    console.log(`Total teachers mapped: ${teachersMap.size}`);
 
-    // Copy students for the source week to target week
+    // Copy students for each day
     const studentsMap = new Map();
-    console.log(`Starting to copy students for 7 days from ${sourceDate} to ${targetDate}`);
-    for (let i = 0; i < 7; i++) {
-      const sourceDateStr = addDays(sourceDate, i);
-      const targetDateStr = addDays(targetDate, i);
-
-      const sourceStudents = await Student.getAll(sourceDateStr);
-      console.log(`Day ${i}: Found ${sourceStudents.length} student(s) on ${sourceDateStr}`);
+    console.log(`Starting to copy students for all 7 days`);
+    for (const day of ALL_DAYS) {
+      const sourceStudents = await Student.getAll(day);
+      console.log(`${day}: Found ${sourceStudents.length} student(s)`);
       for (const student of sourceStudents) {
-        const newStudent = await Student.create({
-          name: student.name,
-          english_name: student.english_name,
-          availability: student.availability,
-          color_keyword: student.color_keyword,
-          weakness_level: student.weakness_level,
-          teacher_notes: student.teacher_notes,
-          date: targetDateStr
-        });
-        // Map old student ID to new student ID for this date
-        studentsMap.set(`${sourceDateStr}-${student.id}`, newStudent.id);
+        studentsMap.set(`${day}-${student.id}`, student.id);
       }
     }
-    console.log(`Total students copied: ${studentsMap.size}`);
+    console.log(`Total students mapped: ${studentsMap.size}`);
 
-    // Get all assignments for the week starting from sourceDate
-    console.log(`Fetching assignments from ${sourceDate} for 7 days...`);
-    const sourceAssignments = await Assignment.getByDateRange(sourceDate, 7);
-    console.log(`Found ${sourceAssignments.length} assignment(s) in source week starting from ${sourceDate}`);
-    if (sourceAssignments.length > 0) {
-      const dates = [...new Set(sourceAssignments.map(a => a.date.toISOString().split('T')[0]))].sort();
-      console.log(`Assignment dates found: ${dates.join(', ')}`);
-    }
-
-    // Delete any existing assignments in the target week (7 days starting from targetDate)
-    const deletedResult = await Assignment.deleteByDateRange(targetDate, 7);
-    console.log(`Deleted ${deletedResult.count} existing assignment(s) in target week`);
-
-    // Copy each assignment to the new date with mapped teacher and student IDs
-    const copiedAssignments = [];
-    console.log(`Starting to copy ${sourceAssignments.length} assignment(s)`);
-    for (const assignment of sourceAssignments) {
-      // Parse the assignment date as YYYY-MM-DD string
-      const assignmentDateStr = assignment.date.toISOString().split('T')[0];
-
-      // Debug: log what we found in the assignment
-      console.log(`\nProcessing assignment ID ${assignment.id} from ${assignmentDateStr}:`);
-      console.log(`  - Original teachers:`, assignment.teachers);
-      console.log(`  - Original students:`, assignment.students);
-
-      // Add the day difference using the helper function
-      const newDateStr = addDays(assignmentDateStr, dayDiff);
-
-      const newAssignmentData = {
-        date: newDateStr,
-        time_slot_id: assignment.time_slot_id,
-        room_id: assignment.room_id,
-        teachers: assignment.teachers?.map(t => ({
-          teacher_id: teachersMap.get(`${assignmentDateStr}-${t.id}`),
-          is_substitute: t.is_substitute || false
-        })).filter(t => t.teacher_id) || [],
-        students: assignment.students?.map(s => ({
-          student_id: studentsMap.get(`${assignmentDateStr}-${s.id}`)
-        })).filter(s => s.student_id) || [],
-        notes: assignment.notes
-      };
-
-      console.log(`Copying assignment from ${assignmentDateStr} to ${newDateStr}: ${newAssignmentData.teachers.length} teachers, ${newAssignmentData.students.length} students`);
-
-      // Only create the assignment if it has at least one teacher or one student
-      if (newAssignmentData.teachers.length > 0 || newAssignmentData.students.length > 0) {
-        const newAssignment = await Assignment.create(newAssignmentData);
-        copiedAssignments.push(newAssignment);
-      } else {
-        console.log(`Skipping assignment from ${assignmentDateStr} - no valid teacher/student mappings found`);
-      }
-    }
-    console.log(`Finished copying ${copiedAssignments.length} assignment(s)`);
+    // Get all assignments for all days
+    console.log(`Fetching assignments for all days...`);
+    const sourceAssignments = await Assignment.getByDays(ALL_DAYS);
+    console.log(`Found ${sourceAssignments.length} assignment(s) total`);
 
     res.json({
-      message: `Successfully copied ${copiedAssignments.length} assignment(s), ${teachersMap.size} teacher(s), and ${studentsMap.size} student(s) from ${sourceDate} to ${targetDate}${deletedResult.count > 0 ? ` (replaced ${deletedResult.count} existing assignment(s))` : ''}`,
-      count: copiedAssignments.length,
+      message: `Week data contains ${sourceAssignments.length} assignment(s), ${teachersMap.size} teacher(s), and ${studentsMap.size} student(s)`,
+      count: sourceAssignments.length,
       teachersCount: teachersMap.size,
       studentsCount: studentsMap.size,
-      deletedCount: deletedResult.count,
-      assignments: copiedAssignments
+      deletedCount: 0,
+      assignments: sourceAssignments
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to copy week', message: error.message });

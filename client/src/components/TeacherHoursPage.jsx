@@ -86,7 +86,7 @@ function TeacherHoursPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     queryKey: ['assignments', isAllWeekMode ? 'all-week' : selectedDate],
     queryFn: async () => {
       if (isAllWeekMode) {
-        const response = await getAssignmentsByDateRange('2024-01-01', 7);
+        const response = await getAssignmentsByDateRange(weekDays);
         return response.data || [];
       } else {
         if (!selectedDate) return [];

@@ -16,6 +16,7 @@ class Assignment {
            'id', s.id,
            'name', s.name,
            'english_name', s.english_name,
+           'korean_name', s.korean_name,
            'color_keyword', s.color_keyword,
            'weakness_level', s.weakness_level
          )) FILTER (WHERE s.id IS NOT NULL), '[]'::json) as students
@@ -32,14 +33,8 @@ class Assignment {
     return result.rows;
   }
 
-  // Get all assignments for a date range
-  static async getByDateRange(startDate, daysCount) {
-    // Parse date components to avoid timezone issues
-    const [year, month, day] = startDate.split('-').map(Number);
-    const endDate = new Date(year, month - 1, day);
-    endDate.setDate(endDate.getDate() + daysCount - 1);
-    const endDateStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
-
+  // Get all assignments for multiple days (by day name array)
+  static async getByDays(days) {
     const result = await pool.query(
       `SELECT
          a.*,
@@ -53,6 +48,7 @@ class Assignment {
            'id', s.id,
            'name', s.name,
            'english_name', s.english_name,
+           'korean_name', s.korean_name,
            'color_keyword', s.color_keyword,
            'weakness_level', s.weakness_level
          )) FILTER (WHERE s.id IS NOT NULL), '[]'::json) as students
@@ -61,10 +57,10 @@ class Assignment {
        LEFT JOIN teachers t ON at.teacher_id = t.id
        LEFT JOIN assignment_students ast ON a.id = ast.assignment_id
        LEFT JOIN students s ON ast.student_id = s.id
-       WHERE a.date >= $1 AND a.date <= $2 AND a.is_active = true
+       WHERE a.date = ANY($1::text[]) AND a.is_active = true
        GROUP BY a.id
        ORDER BY a.date, a.time_slot_id, a.room_id`,
-      [startDate, endDateStr]
+      [days]
     );
     return result.rows;
   }
@@ -84,6 +80,7 @@ class Assignment {
            'id', s.id,
            'name', s.name,
            'english_name', s.english_name,
+           'korean_name', s.korean_name,
            'color_keyword', s.color_keyword,
            'weakness_level', s.weakness_level
          )) FILTER (WHERE s.id IS NOT NULL), '[]'::json) as students
@@ -165,21 +162,25 @@ class Assignment {
       );
       const assignment = assignmentResult.rows[0];
 
-      // Add teachers
-      for (const teacher of teachers) {
+      // Batch insert teachers
+      if (teachers.length > 0) {
+        const teacherValues = teachers.map((t, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`).join(', ');
+        const teacherParams = [assignment.id];
+        teachers.forEach(t => { teacherParams.push(t.teacher_id, t.is_substitute || false); });
         await client.query(
-          `INSERT INTO assignment_teachers (assignment_id, teacher_id, is_substitute)
-           VALUES ($1, $2, $3)`,
-          [assignment.id, teacher.teacher_id, teacher.is_substitute || false]
+          `INSERT INTO assignment_teachers (assignment_id, teacher_id, is_substitute) VALUES ${teacherValues}`,
+          teacherParams
         );
       }
 
-      // Add students
-      for (const student of students) {
+      // Batch insert students
+      if (students.length > 0) {
+        const studentValues = students.map((s, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`).join(', ');
+        const studentParams = [assignment.id];
+        students.forEach(s => { studentParams.push(s.student_id, s.submission_id || null); });
         await client.query(
-          `INSERT INTO assignment_students (assignment_id, student_id, submission_id)
-           VALUES ($1, $2, $3)`,
-          [assignment.id, student.student_id, student.submission_id || null]
+          `INSERT INTO assignment_students (assignment_id, student_id, submission_id) VALUES ${studentValues}`,
+          studentParams
         );
       }
 
@@ -254,11 +255,13 @@ class Assignment {
       // Update teachers if provided
       if (teachers) {
         await client.query('DELETE FROM assignment_teachers WHERE assignment_id = $1', [id]);
-        for (const teacher of teachers) {
+        if (teachers.length > 0) {
+          const teacherValues = teachers.map((t, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`).join(', ');
+          const teacherParams = [id];
+          teachers.forEach(t => { teacherParams.push(t.teacher_id, t.is_substitute || false); });
           await client.query(
-            `INSERT INTO assignment_teachers (assignment_id, teacher_id, is_substitute)
-             VALUES ($1, $2, $3)`,
-            [id, teacher.teacher_id, teacher.is_substitute || false]
+            `INSERT INTO assignment_teachers (assignment_id, teacher_id, is_substitute) VALUES ${teacherValues}`,
+            teacherParams
           );
         }
       }
@@ -266,11 +269,13 @@ class Assignment {
       // Update students if provided
       if (students) {
         await client.query('DELETE FROM assignment_students WHERE assignment_id = $1', [id]);
-        for (const student of students) {
+        if (students.length > 0) {
+          const studentValues = students.map((s, i) => `($1, $${i * 2 + 2}, $${i * 2 + 3})`).join(', ');
+          const studentParams = [id];
+          students.forEach(s => { studentParams.push(s.student_id, s.submission_id || null); });
           await client.query(
-            `INSERT INTO assignment_students (assignment_id, student_id, submission_id)
-             VALUES ($1, $2, $3)`,
-            [id, student.student_id, student.submission_id || null]
+            `INSERT INTO assignment_students (assignment_id, student_id, submission_id) VALUES ${studentValues}`,
+            studentParams
           );
         }
       }
@@ -312,17 +317,11 @@ class Assignment {
     return { count: result.rowCount, assignments: result.rows };
   }
 
-  // Delete assignments by date range (soft delete)
-  static async deleteByDateRange(startDate, daysCount) {
-    // Parse date components to avoid timezone issues
-    const [year, month, day] = startDate.split('-').map(Number);
-    const endDate = new Date(year, month - 1, day);
-    endDate.setDate(endDate.getDate() + daysCount - 1);
-    const endDateStr = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`;
-
+  // Delete assignments by day names (soft delete)
+  static async deleteByDays(days) {
     const result = await pool.query(
-      'UPDATE assignments SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE date >= $1 AND date <= $2 AND is_active = true RETURNING *',
-      [startDate, endDateStr]
+      'UPDATE assignments SET is_active = false, updated_at = CURRENT_TIMESTAMP WHERE date = ANY($1::text[]) AND is_active = true RETURNING *',
+      [days]
     );
     return { count: result.rowCount, assignments: result.rows };
   }
@@ -359,6 +358,7 @@ class Assignment {
            'id', s.id,
            'name', s.name,
            'english_name', s.english_name,
+           'korean_name', s.korean_name,
            'color_keyword', s.color_keyword,
            'weakness_level', s.weakness_level
          )) FILTER (WHERE s.id IS NOT NULL), '[]'::json) as students
@@ -385,53 +385,53 @@ class Assignment {
     const { id, date, time_slot_id, teachers = [], students = [] } = data;
     const errors = [];
 
-    // Skip room validation for online classes (no physical room conflicts)
-
-    // Check teacher conflicts (exclude current assignment if updating)
-    for (const teacher of teachers) {
-      const conflict = await pool.query(
-        `SELECT a.id,
+    // Batch check all teacher conflicts in one query
+    const teacherIds = teachers.map(t => t.teacher_id).filter(Boolean);
+    if (teacherIds.length > 0) {
+      const teacherConflicts = await pool.query(
+        `SELECT at.teacher_id,
                 COALESCE(json_agg(DISTINCT s.name) FILTER (WHERE s.id IS NOT NULL), '[]'::json) as students
          FROM assignments a
          INNER JOIN assignment_teachers at ON a.id = at.assignment_id
          LEFT JOIN assignment_students ast ON a.id = ast.assignment_id
          LEFT JOIN students s ON ast.student_id = s.id
-         WHERE at.teacher_id = $1
+         WHERE at.teacher_id = ANY($1::int[])
          AND a.date = $2
          AND a.time_slot_id = $3
          AND a.is_active = true
          AND ($4::integer IS NULL OR a.id != $4)
-         GROUP BY a.id`,
-        [teacher.teacher_id, date, time_slot_id, id || null]
+         GROUP BY at.teacher_id`,
+        [teacherIds, date, time_slot_id, id || null]
       );
 
-      if (conflict.rows.length > 0) {
-        const conflictingStudents = conflict.rows[0].students.join(', ');
-        errors.push(`Teacher ${teacher.teacher_id} is already scheduled with student(s): ${conflictingStudents} at this time`);
+      for (const row of teacherConflicts.rows) {
+        const conflictingStudents = row.students.join(', ');
+        errors.push(`Teacher ${row.teacher_id} is already scheduled with student(s): ${conflictingStudents} at this time`);
       }
     }
 
-    // Check student conflicts (exclude current assignment if updating)
-    for (const student of students) {
-      const conflict = await pool.query(
-        `SELECT a.id, 
+    // Batch check all student conflicts in one query
+    const studentIds = students.map(s => s.student_id).filter(Boolean);
+    if (studentIds.length > 0) {
+      const studentConflicts = await pool.query(
+        `SELECT ast.student_id,
                 COALESCE(json_agg(DISTINCT t.name) FILTER (WHERE t.id IS NOT NULL), '[]'::json) as teachers
          FROM assignments a
          INNER JOIN assignment_students ast ON a.id = ast.assignment_id
          LEFT JOIN assignment_teachers at ON a.id = at.assignment_id
          LEFT JOIN teachers t ON at.teacher_id = t.id
-         WHERE ast.student_id = $1
+         WHERE ast.student_id = ANY($1::int[])
          AND a.date = $2
          AND a.time_slot_id = $3
          AND a.is_active = true
          AND ($4::integer IS NULL OR a.id != $4)
-         GROUP BY a.id`,
-        [student.student_id, date, time_slot_id, id || null]
+         GROUP BY ast.student_id`,
+        [studentIds, date, time_slot_id, id || null]
       );
 
-      if (conflict.rows.length > 0) {
-        const conflictingTeachers = conflict.rows[0].teachers.join(', ');
-        errors.push(`Student ${student.student_id} is already scheduled with teacher(s): ${conflictingTeachers} at this time`);
+      for (const row of studentConflicts.rows) {
+        const conflictingTeachers = row.teachers.join(', ');
+        errors.push(`Student ${row.student_id} is already scheduled with teacher(s): ${conflictingTeachers} at this time`);
       }
     }
 

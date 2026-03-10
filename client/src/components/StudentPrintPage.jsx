@@ -11,6 +11,7 @@ import {
   getRooms,
   getAllNotionStudents
 } from '../services/api';
+import { weekDays } from '../utils/dayMapping';
 
 function StudentPrintPage() {
   const [selectedStudentId, setSelectedStudentId] = useState('');
@@ -179,7 +180,7 @@ function StudentPrintPage() {
       console.log('=== FETCHING ALL ASSIGNMENTS ===');
       
       // Fetch from the template week (where assignments are stored)
-      const response = await getAssignmentsByDateRange('2024-01-01', 7);
+      const response = await getAssignmentsByDateRange(weekDays);
       const assignments = response.data || [];
       
       console.log('Total assignments in system:', assignments.length);
@@ -288,13 +289,8 @@ function StudentPrintPage() {
     return 'stopped';
   }, [studentData, studentAssignments]);
 
-  // Import dateToDay function to match WeeklyGrid logic
-  const dateToDay = (dateString) => {
-    const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return days[date.getDay()];
-  };
+  // Identity function - dates are now day names directly
+  const dateToDay = (dateString) => dateString;
 
   // Group assignments exactly like WeeklyGrid does for this student
   const scheduleGroups = useMemo(() => {

@@ -25,22 +25,15 @@ function WeeklySchedulingGrid({ selectedDate }) {
   });
 
 
-  // Helper functions
-  const getDayName = (dateString) => {
-    const date = new Date(dateString + 'T00:00:00.000Z');
-    return date.toLocaleDateString('en-US', { 
-      weekday: 'short',
-      timeZone: 'UTC'
-    });
+  // Helper functions - dates are now day names directly
+  const getDayName = (dayName) => {
+    // Return short form (e.g., "Monday" -> "Mon")
+    return dayName ? dayName.substring(0, 3) : '';
   };
 
-  const getDateDisplay = (dateString) => {
-    const date = new Date(dateString + 'T00:00:00.000Z');
-    return date.toLocaleDateString('en-US', { 
-      month: 'short',
-      day: 'numeric',
-      timeZone: 'UTC'
-    });
+  const getDateDisplay = (dayName) => {
+    // Day names are used directly, no date formatting needed
+    return dayName || '';
   };
 
   const toggleStudentSelection = (date, timeSlotId, studentId) => {

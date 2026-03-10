@@ -8,73 +8,73 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// TEMPLATE WEEK: The app uses a fixed week for scheduling (Jan 1-7, 2024)
-// Monday=2024-01-01, Tuesday=2024-01-02, ..., Sunday=2024-01-07
-const TEMPLATE_DATES = {
-  'monday': '2024-01-01',
-  'tuesday': '2024-01-02',
-  'wednesday': '2024-01-03',
-  'thursday': '2024-01-04',
-  'friday': '2024-01-05',
-  'saturday': '2024-01-06',
-  'sunday': '2024-01-07'
+// Day names used throughout the scheduling system
+const ALL_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+// Map from lowercase day names for lookup
+const DAY_NAME_MAP = {
+  'monday': 'Monday',
+  'tuesday': 'Tuesday',
+  'wednesday': 'Wednesday',
+  'thursday': 'Thursday',
+  'friday': 'Friday',
+  'saturday': 'Saturday',
+  'sunday': 'Sunday'
 };
 
-// Get current day of week and map to template date
-const getTodayTemplateDate = () => {
-  const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-  const today = new Date();
-  const dayName = days[today.getDay()];
-  return TEMPLATE_DATES[dayName] || '2024-01-01';
+// Backward compat: map old fixed dates to day names
+const OLD_DATE_TO_DAY = {
+  '2024-01-01': 'Monday',
+  '2024-01-02': 'Tuesday',
+  '2024-01-03': 'Wednesday',
+  '2024-01-04': 'Thursday',
+  '2024-01-05': 'Friday',
+  '2024-01-06': 'Saturday',
+  '2024-01-07': 'Sunday'
 };
 
-// Helper to parse relative dates - maps to TEMPLATE WEEK dates
+// Get current day of week as day name
+const getTodayDayName = () => {
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  return days[new Date().getDay()];
+};
+
+// Helper to parse relative dates - returns day name string
 const parseRelativeDate = (dateStr) => {
-  if (!dateStr) return getTodayTemplateDate();
+  if (!dateStr) return getTodayDayName();
 
   const lowerDate = dateStr.toLowerCase().trim();
 
-  // Map "today" to current day of week in template
+  // Map "today" to current day of week
   if (lowerDate === 'today') {
-    return getTodayTemplateDate();
+    return getTodayDayName();
   }
 
-  // Map "tomorrow" to next day in template
+  // Map "tomorrow" to next day
   if (lowerDate === 'tomorrow') {
-    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
-    const today = new Date();
-    const tomorrowIndex = (today.getDay() + 1) % 7;
-    const tomorrowName = days[tomorrowIndex];
-    return TEMPLATE_DATES[tomorrowName] || '2024-01-01';
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const tomorrowIndex = (new Date().getDay() + 1) % 7;
+    return days[tomorrowIndex];
   }
 
   // Check for day names directly (monday, tuesday, etc.)
-  if (TEMPLATE_DATES[lowerDate]) {
-    return TEMPLATE_DATES[lowerDate];
+  if (DAY_NAME_MAP[lowerDate]) {
+    return DAY_NAME_MAP[lowerDate];
   }
 
   // Check for "next monday", "next tuesday", etc.
   const nextMatch = lowerDate.match(/next\s+(\w+)/);
-  if (nextMatch && TEMPLATE_DATES[nextMatch[1]]) {
-    return TEMPLATE_DATES[nextMatch[1]];
+  if (nextMatch && DAY_NAME_MAP[nextMatch[1]]) {
+    return DAY_NAME_MAP[nextMatch[1]];
   }
 
-  // Try parsing as a regular date (for specific dates like 2024-01-03)
-  const parsed = new Date(dateStr);
-  if (!isNaN(parsed.getTime())) {
-    return parsed.toISOString().split('T')[0];
+  // Backward compat: check for old date format (2024-01-01 etc.)
+  if (OLD_DATE_TO_DAY[dateStr]) {
+    return OLD_DATE_TO_DAY[dateStr];
   }
 
   // Default to Monday
-  return '2024-01-01';
-};
-
-// Helper to add days to a date string
-const addDays = (dateStr, days) => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(Date.UTC(year, month - 1, day));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().split('T')[0];
+  return 'Monday';
 };
 
 // Helper to format 24h time to 12h AM/PM format
@@ -665,8 +665,9 @@ async function executeFunction(name, args) {
         const date = parseRelativeDate(args.date);
         const assignments = await Assignment.getByDate(date);
         // Get day name from template date
-        const dayNames = { '2024-01-01': 'Monday', '2024-01-02': 'Tuesday', '2024-01-03': 'Wednesday',
-                          '2024-01-04': 'Thursday', '2024-01-05': 'Friday', '2024-01-06': 'Saturday', '2024-01-07': 'Sunday' };
+        // date column now stores day names directly
+        const dayNames = { 'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday',
+                          'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday' };
 
         return {
           date,
@@ -859,8 +860,9 @@ async function executeFunction(name, args) {
       }
 
       case 'get_classes_by_teacher': {
-        const dayNames = { '2024-01-01': 'Monday', '2024-01-02': 'Tuesday', '2024-01-03': 'Wednesday',
-                          '2024-01-04': 'Thursday', '2024-01-05': 'Friday', '2024-01-06': 'Saturday', '2024-01-07': 'Sunday' };
+        // date column now stores day names directly
+        const dayNames = { 'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday',
+                          'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday' };
 
         // Find teacher across all dates
         const teacherResult = await pool.query(
@@ -912,8 +914,9 @@ async function executeFunction(name, args) {
       }
 
       case 'get_classes_by_student': {
-        const dayNames = { '2024-01-01': 'Monday', '2024-01-02': 'Tuesday', '2024-01-03': 'Wednesday',
-                          '2024-01-04': 'Thursday', '2024-01-05': 'Friday', '2024-01-06': 'Saturday', '2024-01-07': 'Sunday' };
+        // date column now stores day names directly
+        const dayNames = { 'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday',
+                          'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday' };
 
         // Find student across all dates
         const studentResult = await pool.query(
@@ -967,8 +970,9 @@ async function executeFunction(name, args) {
       }
 
       case 'find_available_slots': {
-        const dayNames = { '2024-01-01': 'Monday', '2024-01-02': 'Tuesday', '2024-01-03': 'Wednesday',
-                          '2024-01-04': 'Thursday', '2024-01-05': 'Friday', '2024-01-06': 'Saturday', '2024-01-07': 'Sunday' };
+        // date column now stores day names directly
+        const dayNames = { 'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday',
+                          'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday' };
 
         // Find teacher
         const teacherResult = await pool.query(
@@ -983,7 +987,7 @@ async function executeFunction(name, args) {
         }
 
         const teacherName = teacherResult.rows[0].name;
-        const targetDates = args.date ? [parseRelativeDate(args.date)] : Object.values(TEMPLATE_DATES);
+        const targetDates = args.date ? [parseRelativeDate(args.date)] : ALL_DAY_NAMES;
 
         // Get all existing assignments for this teacher
         const busyResult = await pool.query(
@@ -1139,8 +1143,9 @@ async function executeFunction(name, args) {
 
         const assignment = await Assignment.create(assignmentData);
         // Get day name from template date
-        const dayNames = { '2024-01-01': 'Monday', '2024-01-02': 'Tuesday', '2024-01-03': 'Wednesday',
-                          '2024-01-04': 'Thursday', '2024-01-05': 'Friday', '2024-01-06': 'Saturday', '2024-01-07': 'Sunday' };
+        // date column now stores day names directly
+        const dayNames = { 'Monday': 'Monday', 'Tuesday': 'Tuesday', 'Wednesday': 'Wednesday',
+                          'Thursday': 'Thursday', 'Friday': 'Friday', 'Saturday': 'Saturday', 'Sunday': 'Sunday' };
         return {
           success: true,
           message: 'Class created!',
@@ -1226,34 +1231,29 @@ async function executeFunction(name, args) {
       }
 
       case 'create_recurring_class': {
+        // With day names, "recurring" just means creating on the same day name
+        // since the schedule is a weekly template
         const startDate = parseRelativeDate(args.start_date);
-        const weeks = args.weeks || 4;
-        const results = [];
+        const result = await executeFunction('create_class', {
+          date: startDate,
+          time: args.time,
+          teacher_names: args.teacher_names,
+          student_names: args.student_names,
+          room: args.room,
+          notes: args.notes
+        });
 
-        for (let i = 0; i < weeks; i++) {
-          const classDate = addDays(startDate, i * 7);
-          const result = await executeFunction('create_class', {
-            date: classDate,
-            time: args.time,
-            teacher_names: args.teacher_names,
-            student_names: args.student_names,
-            room: args.room,
-            notes: args.notes
-          });
-
-          results.push({
-            date: classDate,
+        return {
+          success: result.success,
+          message: result.success
+            ? `Created class on ${startDate} (weekly template - repeats every ${startDate})`
+            : result.error,
+          results: [{
+            date: startDate,
             success: result.success,
             error: result.error,
             id: result.class?.id
-          });
-        }
-
-        const successCount = results.filter(r => r.success).length;
-        return {
-          success: successCount > 0,
-          message: `Created recurring class for ${successCount} of ${weeks} weeks`,
-          results
+          }]
         };
       }
 
@@ -1550,17 +1550,10 @@ const getSystemPrompt = () => {
 
   return `You are a helpful scheduling assistant for ICAN Academy's online class scheduling system.
 
-IMPORTANT - TEMPLATE WEEK SYSTEM:
-This app uses a FIXED TEMPLATE WEEK (not real dates). When user says "today" or a day name, use these mappings:
-- Monday = 2024-01-01
-- Tuesday = 2024-01-02
-- Wednesday = 2024-01-03
-- Thursday = 2024-01-04
-- Friday = 2024-01-05
-- Saturday = 2024-01-06
-- Sunday = 2024-01-07
+IMPORTANT - WEEKLY TEMPLATE SYSTEM:
+This app uses DAY NAMES directly (Monday, Tuesday, etc.) for scheduling. When user says "today" or a day name, use the day name directly.
 
-Current day of week: ${todayDayName} (maps to ${TEMPLATE_DATES[todayDayName.toLowerCase()]})
+Current day of week: ${todayDayName}
 
 AVAILABLE FUNCTIONS (use these directly):
 
@@ -1612,7 +1605,7 @@ CRITICAL RULES:
 4. **DELETE**: Only use delete_class when user explicitly says "delete", "cancel", or "remove the class entirely"
 5. Use teacher/student NAMES not IDs when creating classes
 6. For time ranges like "8am to 10am", use create_class_range
-7. Time slots are 30 minutes each (8:00-22:00)
+7. Time slots are 30 minutes each (8:00-23:00)
 8. Always confirm actions after completing them
 
 EXAMPLES:
@@ -1626,7 +1619,7 @@ EXAMPLES:
 - "help" or "what can you do?" → get_help()
 
 TIME FORMATS: "8am", "2pm", "14:30", "9:30am"
-DATE FORMATS: "today", "monday", "tuesday", etc. (maps to template week)
+DATE FORMATS: "today", "monday", "tuesday", etc. (day names directly)
 
 Be concise and helpful!`;
 };

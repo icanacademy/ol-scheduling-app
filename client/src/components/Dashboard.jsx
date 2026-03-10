@@ -33,7 +33,7 @@ function Dashboard({ selectedDay }) {
     queryFn: async () => {
       if (selectedDay === 'All Week') {
         // Fetch entire week
-        const response = await getAssignmentsByDateRange('2024-01-01', 7);
+        const response = await getAssignmentsByDateRange(weekDays);
         return response.data;
       } else {
         // Fetch single day
@@ -42,8 +42,6 @@ function Dashboard({ selectedDay }) {
       }
     },
     enabled: !!selectedDay,
-    staleTime: 0, // Always consider data stale to force fresh fetches
-    cacheTime: 0, // Don't cache data
   });
   
   // Fetch teachers - for All Week view, get all 7 days; for single day, get specific day
@@ -51,13 +49,14 @@ function Dashboard({ selectedDay }) {
     queryKey: ['teachers', selectedDay === 'All Week' ? 'all-week' : selectedDate],
     queryFn: async () => {
       if (selectedDay === 'All Week') {
-        // Fetch teachers for all 7 days
+        // Fetch teachers for all 7 days in parallel
         const teachersByDay = {};
-        for (const day of weekDays) {
-          const date = dayToDate(day);
-          const response = await getTeachers(date);
-          teachersByDay[day] = response.data;
-        }
+        const results = await Promise.all(
+          weekDays.map(day => getTeachers(dayToDate(day)))
+        );
+        weekDays.forEach((day, i) => {
+          teachersByDay[day] = results[i].data;
+        });
         return teachersByDay;
       } else {
         const response = await getTeachers(selectedDate);
@@ -347,6 +346,8 @@ function Dashboard({ selectedDay }) {
             selectedDate={selectedDate}
             onRefetch={refetch}
             isReadOnly={true} // Individual days are view-only
+            teachers={teachers || []}
+            students={students || []}
           />
         )}
       </div>

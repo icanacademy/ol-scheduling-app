@@ -54,13 +54,16 @@ class Backup {
 
   // Export all data from database as JSON
   static async exportAllData() {
-    const teachers = await pool.query('SELECT * FROM teachers ORDER BY id');
-    const students = await pool.query('SELECT * FROM students ORDER BY id');
-    const assignments = await pool.query('SELECT * FROM assignments ORDER BY id');
-    const assignmentTeachers = await pool.query('SELECT * FROM assignment_teachers ORDER BY id');
-    const assignmentStudents = await pool.query('SELECT * FROM assignment_students ORDER BY id');
-    const rooms = await pool.query('SELECT * FROM rooms ORDER BY id');
-    const timeSlots = await pool.query('SELECT * FROM time_slots ORDER BY id');
+    const [teachers, students, assignments, assignmentTeachers, assignmentStudents, rooms, timeSlots] =
+      await Promise.all([
+        pool.query('SELECT * FROM teachers ORDER BY id'),
+        pool.query('SELECT * FROM students ORDER BY id'),
+        pool.query('SELECT * FROM assignments ORDER BY id'),
+        pool.query('SELECT * FROM assignment_teachers ORDER BY id'),
+        pool.query('SELECT * FROM assignment_students ORDER BY id'),
+        pool.query('SELECT * FROM rooms ORDER BY id'),
+        pool.query('SELECT * FROM time_slots ORDER BY id'),
+      ]);
 
     return {
       version: '2.0',
@@ -79,20 +82,17 @@ class Backup {
 
   // Get current database counts
   static async getCurrentCounts() {
-    const teachersResult = await pool.query(
-      'SELECT COUNT(*) FROM teachers WHERE is_active = true'
-    );
-    const studentsResult = await pool.query(
-      'SELECT COUNT(*) FROM students WHERE is_active = true'
-    );
-    const assignmentsResult = await pool.query(
-      'SELECT COUNT(*) FROM assignments WHERE is_active = true'
+    const result = await pool.query(
+      `SELECT
+        (SELECT COUNT(*) FROM teachers WHERE is_active = true) as teachers,
+        (SELECT COUNT(*) FROM students WHERE is_active = true) as students,
+        (SELECT COUNT(*) FROM assignments WHERE is_active = true) as assignments`
     );
 
     return {
-      teachers: parseInt(teachersResult.rows[0].count),
-      students: parseInt(studentsResult.rows[0].count),
-      assignments: parseInt(assignmentsResult.rows[0].count)
+      teachers: parseInt(result.rows[0].teachers),
+      students: parseInt(result.rows[0].students),
+      assignments: parseInt(result.rows[0].assignments)
     };
   }
 
@@ -179,56 +179,119 @@ class Backup {
       // Restore data
       const tables = backupData.tables;
 
+      // Convert old date format (2024-01-01 through 2024-01-07) to day names
+      const oldDateToDayName = {
+        '2024-01-01': 'Monday',
+        '2024-01-02': 'Tuesday',
+        '2024-01-03': 'Wednesday',
+        '2024-01-04': 'Thursday',
+        '2024-01-05': 'Friday',
+        '2024-01-06': 'Saturday',
+        '2024-01-07': 'Sunday'
+      };
+      const convertDate = (dateVal) => {
+        if (!dateVal) return dateVal;
+        const dateStr = typeof dateVal === 'object' && dateVal instanceof Date
+          ? dateVal.toISOString().split('T')[0]
+          : String(dateVal).split('T')[0];
+        return oldDateToDayName[dateStr] || dateStr;
+      };
+
+      // Apply date conversion to all tables with date columns
+      if (tables.teachers) {
+        tables.teachers.forEach(row => { row.date = convertDate(row.date); });
+      }
+      if (tables.students) {
+        tables.students.forEach(row => { row.date = convertDate(row.date); });
+      }
+      if (tables.assignments) {
+        tables.assignments.forEach(row => { row.date = convertDate(row.date); });
+      }
+
+      const BATCH_SIZE = 50;
+
       if (restoreTeachers && tables.teachers) {
-        for (const row of tables.teachers) {
+        for (let i = 0; i < tables.teachers.length; i += BATCH_SIZE) {
+          const batch = tables.teachers.slice(i, i + BATCH_SIZE);
+          const placeholders = batch.map((_, idx) =>
+            `($${idx * 8 + 1}, $${idx * 8 + 2}, $${idx * 8 + 3}, $${idx * 8 + 4}, $${idx * 8 + 5}, $${idx * 8 + 6}, $${idx * 8 + 7}, $${idx * 8 + 8})`
+          ).join(', ');
+          const params = batch.flatMap(row => [
+            row.id, row.name, JSON.stringify(row.availability), row.color_keyword, row.date, row.is_active, row.created_at, row.updated_at
+          ]);
           await client.query(
             `INSERT INTO teachers (id, name, availability, color_keyword, date, is_active, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (id) DO UPDATE SET name = $2, availability = $3, color_keyword = $4, date = $5, is_active = $6`,
-            [row.id, row.name, JSON.stringify(row.availability), row.color_keyword, row.date, row.is_active, row.created_at, row.updated_at]
+             VALUES ${placeholders}
+             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, availability = EXCLUDED.availability, color_keyword = EXCLUDED.color_keyword, date = EXCLUDED.date, is_active = EXCLUDED.is_active`,
+            params
           );
         }
       }
 
       if (restoreStudents && tables.students) {
-        for (const row of tables.students) {
+        for (let i = 0; i < tables.students.length; i += BATCH_SIZE) {
+          const batch = tables.students.slice(i, i + BATCH_SIZE);
+          const cols = 26;
+          const placeholders = batch.map((_, idx) =>
+            `(${Array.from({ length: cols }, (__, c) => `$${idx * cols + c + 1}`).join(', ')})`
+          ).join(', ');
+          const params = batch.flatMap(row => [
+            row.id, row.name, row.english_name, JSON.stringify(row.availability), row.color_keyword, row.weakness_level, row.teacher_notes, row.date, row.is_active, row.created_at, row.updated_at, row.school, row.program_start_date, row.program_end_date, row.student_id, row.gender, row.grade, row.student_type, row.reading_score, row.grammar_score, row.listening_score, row.writing_score, row.reading_level, row.wpm, row.gbwt, row.subjects
+          ]);
           await client.query(
             `INSERT INTO students (id, name, english_name, availability, color_keyword, weakness_level, teacher_notes, date, is_active, created_at, updated_at, school, program_start_date, program_end_date, student_id, gender, grade, student_type, reading_score, grammar_score, listening_score, writing_score, reading_level, wpm, gbwt, subjects)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)
-             ON CONFLICT (id) DO UPDATE SET name = $2, english_name = $3, availability = $4, color_keyword = $5, weakness_level = $6, teacher_notes = $7, date = $8, is_active = $9`,
-            [row.id, row.name, row.english_name, JSON.stringify(row.availability), row.color_keyword, row.weakness_level, row.teacher_notes, row.date, row.is_active, row.created_at, row.updated_at, row.school, row.program_start_date, row.program_end_date, row.student_id, row.gender, row.grade, row.student_type, row.reading_score, row.grammar_score, row.listening_score, row.writing_score, row.reading_level, row.wpm, row.gbwt, row.subjects]
+             VALUES ${placeholders}
+             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, english_name = EXCLUDED.english_name, availability = EXCLUDED.availability, color_keyword = EXCLUDED.color_keyword, weakness_level = EXCLUDED.weakness_level, teacher_notes = EXCLUDED.teacher_notes, date = EXCLUDED.date, is_active = EXCLUDED.is_active`,
+            params
           );
         }
       }
 
       if (restoreAssignments && tables.assignments) {
-        for (const row of tables.assignments) {
+        for (let i = 0; i < tables.assignments.length; i += BATCH_SIZE) {
+          const batch = tables.assignments.slice(i, i + BATCH_SIZE);
+          const placeholders = batch.map((_, idx) =>
+            `($${idx * 8 + 1}, $${idx * 8 + 2}, $${idx * 8 + 3}, $${idx * 8 + 4}, $${idx * 8 + 5}, $${idx * 8 + 6}, $${idx * 8 + 7}, $${idx * 8 + 8})`
+          ).join(', ');
+          const params = batch.flatMap(row => [
+            row.id, row.date, row.time_slot_id, row.room_id, row.notes, row.is_active, row.created_at, row.updated_at
+          ]);
           await client.query(
             `INSERT INTO assignments (id, date, time_slot_id, room_id, notes, is_active, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (id) DO UPDATE SET date = $2, time_slot_id = $3, room_id = $4, notes = $5, is_active = $6`,
-            [row.id, row.date, row.time_slot_id, row.room_id, row.notes, row.is_active, row.created_at, row.updated_at]
+             VALUES ${placeholders}
+             ON CONFLICT (id) DO UPDATE SET date = EXCLUDED.date, time_slot_id = EXCLUDED.time_slot_id, room_id = EXCLUDED.room_id, notes = EXCLUDED.notes, is_active = EXCLUDED.is_active`,
+            params
           );
         }
 
         if (tables.assignment_teachers) {
-          for (const row of tables.assignment_teachers) {
+          for (let i = 0; i < tables.assignment_teachers.length; i += BATCH_SIZE) {
+            const batch = tables.assignment_teachers.slice(i, i + BATCH_SIZE);
+            const placeholders = batch.map((_, idx) =>
+              `($${idx * 4 + 1}, $${idx * 4 + 2}, $${idx * 4 + 3}, $${idx * 4 + 4})`
+            ).join(', ');
+            const params = batch.flatMap(row => [row.id, row.assignment_id, row.teacher_id, row.is_substitute]);
             await client.query(
               `INSERT INTO assignment_teachers (id, assignment_id, teacher_id, is_substitute)
-               VALUES ($1, $2, $3, $4)
+               VALUES ${placeholders}
                ON CONFLICT (id) DO NOTHING`,
-              [row.id, row.assignment_id, row.teacher_id, row.is_substitute]
+              params
             );
           }
         }
 
         if (tables.assignment_students) {
-          for (const row of tables.assignment_students) {
+          for (let i = 0; i < tables.assignment_students.length; i += BATCH_SIZE) {
+            const batch = tables.assignment_students.slice(i, i + BATCH_SIZE);
+            const placeholders = batch.map((_, idx) =>
+              `($${idx * 4 + 1}, $${idx * 4 + 2}, $${idx * 4 + 3}, $${idx * 4 + 4})`
+            ).join(', ');
+            const params = batch.flatMap(row => [row.id, row.assignment_id, row.student_id, row.submission_id]);
             await client.query(
               `INSERT INTO assignment_students (id, assignment_id, student_id, submission_id)
-               VALUES ($1, $2, $3, $4)
+               VALUES ${placeholders}
                ON CONFLICT (id) DO NOTHING`,
-              [row.id, row.assignment_id, row.student_id, row.submission_id]
+              params
             );
           }
         }
@@ -317,6 +380,60 @@ class Backup {
     }
 
     return { success: true };
+  }
+
+  // Clean up soft-deleted records older than specified days
+  static async cleanupSoftDeletes(daysOld = 90) {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Delete old soft-deleted assignment junction records first (FK order)
+      const assignmentStudents = await client.query(
+        `DELETE FROM assignment_students WHERE assignment_id IN (
+          SELECT id FROM assignments WHERE is_active = false AND updated_at < NOW() - INTERVAL '1 day' * $1
+        )`,
+        [daysOld]
+      );
+      const assignmentTeachers = await client.query(
+        `DELETE FROM assignment_teachers WHERE assignment_id IN (
+          SELECT id FROM assignments WHERE is_active = false AND updated_at < NOW() - INTERVAL '1 day' * $1
+        )`,
+        [daysOld]
+      );
+
+      // Delete old soft-deleted records
+      const assignments = await client.query(
+        `DELETE FROM assignments WHERE is_active = false AND updated_at < NOW() - INTERVAL '1 day' * $1`,
+        [daysOld]
+      );
+      const teachers = await client.query(
+        `DELETE FROM teachers WHERE is_active = false AND updated_at < NOW() - INTERVAL '1 day' * $1`,
+        [daysOld]
+      );
+      const students = await client.query(
+        `DELETE FROM students WHERE is_active = false AND updated_at < NOW() - INTERVAL '1 day' * $1`,
+        [daysOld]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        deleted: {
+          students: students.rowCount,
+          teachers: teachers.rowCount,
+          assignments: assignments.rowCount,
+          assignment_teachers: assignmentTeachers.rowCount,
+          assignment_students: assignmentStudents.rowCount,
+        },
+        olderThanDays: daysOld
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   // Sync is no longer needed for serverless (backups are stored in DB)

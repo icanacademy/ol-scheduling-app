@@ -103,7 +103,7 @@ function NotesPage({ selectedDate }) {
         <div>
           <h2 className="text-2xl font-bold text-gray-800">Notes & To-Do</h2>
           <p className="text-gray-500 text-sm mt-1">
-            {selectedDate ? `Notes for ${new Date(selectedDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}` : 'Track schedule changes, reminders, and tasks'}
+            {selectedDate ? `Notes for ${selectedDate}` : 'Track schedule changes, reminders, and tasks'}
           </p>
         </div>
         <button

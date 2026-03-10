@@ -122,7 +122,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     queryFn: async () => {
       if (isAllWeekMode) {
         // Fetch entire week
-        const response = await getAssignmentsByDateRange('2024-01-01', 7);
+        const response = await getAssignmentsByDateRange(weekDays);
         return response.data;
       } else {
         // Fetch single day
@@ -145,17 +145,17 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
     },
   });
 
-  // Preset templates based on time slots (8 AM to 10 PM, 30-min slots = 28 total)
+  // Preset templates based on time slots (8 AM to 11 PM, 30-min slots = 30 total)
   // Slots 1-8: 8 AM - 12 PM (Morning)
   // Slots 9-12: 12 PM - 2 PM (Lunch)
   // Slots 13-20: 2 PM - 6 PM (Afternoon)
-  // Slots 21-28: 6 PM - 10 PM (Evening)
+  // Slots 21-30: 6 PM - 11 PM (Evening)
   const presetTemplates = useMemo(() => {
     if (!timeSlots) return [];
     const allIds = timeSlots.map(ts => ts.id);
     const morningIds = timeSlots.filter((_, i) => i < 8).map(ts => ts.id); // 8 AM - 12 PM
     const afternoonIds = timeSlots.filter((_, i) => i >= 8 && i < 20).map(ts => ts.id); // 12 PM - 6 PM
-    const eveningIds = timeSlots.filter((_, i) => i >= 20).map(ts => ts.id); // 6 PM - 10 PM
+    const eveningIds = timeSlots.filter((_, i) => i >= 20).map(ts => ts.id); // 6 PM - 11 PM
     const workdayIds = timeSlots.filter((_, i) => i >= 2 && i < 20).map(ts => ts.id); // 9 AM - 6 PM
 
     return [
@@ -163,7 +163,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       { name: 'Work Hours (9-6)', ids: workdayIds, color: 'bg-green-600' },
       { name: 'Morning (8-12)', ids: morningIds, color: 'bg-yellow-600' },
       { name: 'Afternoon (12-6)', ids: afternoonIds, color: 'bg-orange-600' },
-      { name: 'Evening (6-10)', ids: eveningIds, color: 'bg-purple-600' },
+      { name: 'Evening (6-11)', ids: eveningIds, color: 'bg-purple-600' },
       { name: 'Clear All', ids: [], color: 'bg-gray-600' },
     ];
   }, [timeSlots]);
@@ -794,7 +794,7 @@ function TeachersPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
       }) || [];
 
       dayAssignments.forEach(assignment => {
-        const students = assignment.students?.map(s => s.name).join(', ') || 'No students';
+        const students = assignment.students?.map(s => s.korean_name ? `${s.name} (${s.korean_name})` : s.name).join(', ') || 'No students';
         const room = assignment.room?.name || 'No room';
         lines.push(`${dayAbbrev[day]}: ${students} (${room})`);
       });

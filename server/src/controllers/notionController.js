@@ -1,4 +1,5 @@
 import axios from 'axios';
+import pool from '../db/connection.js';
 import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
 import TimeSlot from '../models/TimeSlot.js';
@@ -217,7 +218,7 @@ export const previewTeachersFromNotion = async (req, res) => {
   }
 };
 
-// Import teachers from Notion
+// Import teachers from Notion (batch optimized)
 export const importTeachersFromNotion = async (req, res) => {
   try {
     const { date } = req.body;
@@ -235,57 +236,48 @@ export const importTeachersFromNotion = async (req, res) => {
       });
     }
 
-    // Query Notion database with pagination - no filter so we get all teachers
+    // Query Notion database with pagination
     const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
 
-    const createdTeachers = [];
-    const updatedTeachers = [];
     const errors = [];
+    const availability = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
+    // Extract all valid teacher names from Notion
+    const notionTeachers = [];
     for (const page of allPages) {
       try {
         const nickname = (page.properties.Nickname?.rich_text?.[0]?.plain_text || '').trim();
-        
-        // Skip teachers without nicknames
-        if (!nickname) {
-          continue;
-        }
-
-        // For Desktop version, default to all 12 slots (full day availability)
-        const availability = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-
-        // Check if teacher already exists
-        const existingTeacher = await Teacher.findByName(nickname, date);
-
-        const teacherData = {
-          name: nickname,
-          availability: availability,
-          color_keyword: 'blue',
-          date: date
-        };
-
-        let teacher;
-        if (existingTeacher) {
-          teacher = await Teacher.reactivate(existingTeacher.id, teacherData);
-          updatedTeachers.push({
-            name: nickname,
-            availability: 'Full day',
-            slots: availability.length
-          });
-        } else {
-          teacher = await Teacher.create(teacherData);
-          createdTeachers.push({
-            name: nickname,
-            availability: 'Full day',
-            slots: availability.length
-          });
-        }
-
+        if (nickname) notionTeachers.push(nickname);
       } catch (error) {
-        const teacherName = page.properties.Nickname?.rich_text?.[0]?.plain_text || 'Unknown';
-        errors.push(`${teacherName}: ${error.message}`);
+        errors.push(`${page.id}: ${error.message}`);
       }
     }
+
+    // Single batch lookup for all existing teachers
+    const existingTeachers = await Teacher.findByNames(notionTeachers, date);
+    const existingNameMap = new Map(existingTeachers.map(t => [t.name.toLowerCase(), t.id]));
+
+    // Split into creates and updates
+    const toCreate = [];
+    const toUpdate = [];
+    for (const name of notionTeachers) {
+      const teacherData = { name, availability, color_keyword: 'blue', date };
+      const existingId = existingNameMap.get(name.toLowerCase());
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: teacherData });
+      } else {
+        toCreate.push(teacherData);
+      }
+    }
+
+    // Batch create and batch reactivate
+    const [createdRows, updatedRows] = await Promise.all([
+      toCreate.length > 0 ? Teacher.createBatch(toCreate) : [],
+      toUpdate.length > 0 ? Teacher.reactivateBatch(toUpdate) : [],
+    ]);
+
+    const createdTeachers = createdRows.map(t => ({ name: t.name, availability: 'Full day', slots: 12 }));
+    const updatedTeachers = updatedRows.map(t => ({ name: t.name, availability: 'Full day', slots: 12 }));
 
     res.json({
       success: true,
@@ -301,9 +293,9 @@ export const importTeachersFromNotion = async (req, res) => {
     });
   } catch (error) {
     console.error('Error importing teachers from Notion:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to import teachers from Notion',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -386,6 +378,12 @@ export const previewStudentsFromNotion = async (req, res) => {
           continue;
         }
 
+        // Extract Checkbox days (multi_select)
+        const checkboxDays = (page.properties['Checkbox']?.multi_select || []).map(s => s.name);
+
+        // Compute availability slot IDs from Start Time / End Time
+        const slotIds = getSlotIds(startTime, endTime) || [];
+
         // Only show students who are NOT already in the system
         students.push({
           name: name,
@@ -393,7 +391,9 @@ export const previewStudentsFromNotion = async (req, res) => {
           grade: grade,
           preferredTime: preferredTime,
           notionPageId: page.id,
-          exists: false
+          exists: false,
+          scheduleDays: checkboxDays,
+          slots: slotIds.length
         });
       } catch (error) {
         errors.push(error.message);
@@ -416,10 +416,10 @@ export const previewStudentsFromNotion = async (req, res) => {
   }
 };
 
-// Import students from Notion
+// Import students from Notion (batch optimized, with optional change detection)
 export const importStudentsFromNotion = async (req, res) => {
   try {
-    const { date } = req.body;
+    const { date, onlyChanged } = req.body;
 
     if (!date) {
       return res.status(400).json({ error: 'date is required' });
@@ -434,121 +434,125 @@ export const importStudentsFromNotion = async (req, res) => {
       });
     }
 
-    // Query Notion database with pagination
-    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId);
+    // Build query — if onlyChanged flag set, filter by last_edited_time
+    let queryBody = {};
+    if (onlyChanged) {
+      try {
+        const syncLog = await pool.query(
+          `SELECT last_edited_filter FROM notion_sync_log
+           WHERE sync_type = 'students' ORDER BY id DESC LIMIT 1`
+        );
+        if (syncLog.rows[0]?.last_edited_filter) {
+          queryBody.filter = {
+            timestamp: 'last_edited_time',
+            last_edited_time: { after: syncLog.rows[0].last_edited_filter.toISOString() }
+          };
+        }
+      } catch (e) { /* table may not exist */ }
+    }
 
-    const createdStudents = [];
-    const updatedStudents = [];
+    // Query Notion database with pagination
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId, queryBody);
+
     const errors = [];
 
+    // Extract all valid student data from Notion pages
+    const notionStudents = [];
     for (const page of allPages) {
       try {
-        // Try multiple field names for student name (same as preview function)
         const name = (page.properties['Full Name']?.title?.[0]?.plain_text ||
                      page.properties['Student']?.title?.[0]?.plain_text ||
                      page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim();
+        if (!name) continue;
 
-        // Get Korean name from Notion
         const koreanName = (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim();
-
-        // Get grade level from Notion
         const grade = page.properties['Grade']?.rich_text?.[0]?.plain_text || '';
-
-        // Get time preferences from Start Time and End Time (select fields)
         const startTime = page.properties['Start Time']?.select?.name || '';
         const endTime = page.properties['End Time']?.select?.name || '';
-        const preferredTime = page.properties['Preferred Time']?.rich_text?.[0]?.plain_text || '';
-
-        // Get country from Notion (try different possible field types)
         const country = page.properties['Country']?.select?.name ||
                        page.properties['Country']?.rich_text?.[0]?.plain_text ||
                        page.properties['Nationality']?.select?.name ||
                        page.properties['Nationality']?.rich_text?.[0]?.plain_text || '';
+        const schedulePattern = startTime && endTime ? `${startTime} - ${endTime}` : 'Manual scheduling';
 
-        // Get the Notion page ID for unique identification
-        const notionPageId = page.id;
+        // Extract Checkbox days (multi_select)
+        const checkboxDays = (page.properties['Checkbox']?.multi_select || []).map(s => s.name);
 
-        if (!name) {
-          continue;
-        }
+        // Compute availability slot IDs from Start Time / End Time
+        const slotIds = getSlotIds(startTime, endTime) || [];
 
-        // Set empty availability - students start with no scheduled times
-        const availability = [];
-
-        // Determine schedule pattern based on time preferences
-        let scheduleDays = []; // Empty by default - will be set manually
-        let schedulePattern = 'Manual scheduling';
-
-        if (startTime && endTime) {
-          schedulePattern = `${startTime} - ${endTime}`;
-          // For now, leave scheduleDays empty until we add dedicated fields to Notion
-          // Later we can add logic here to parse schedule days from Notion
-        }
-
-        // Check if student already exists by Notion page ID (NOT by name)
-        // This allows multiple students with the same name to be imported
-        const existingStudent = await Student.findByNotionPageId(notionPageId);
-
-        const studentData = {
-          name: name,
-          korean_name: koreanName,
-          grade: grade,
-          country: country,
-          availability: availability,
-          color_keyword: 'blue',
-          date: date,
-          teacher_notes: '',
-          schedule_days: scheduleDays,
-          schedule_pattern: schedulePattern,
-          notion_page_id: notionPageId
-        };
-
-        let student;
-        if (existingStudent) {
-          // Update existing student (same Notion record imported before)
-          student = await Student.reactivate(existingStudent.id, studentData);
-          updatedStudents.push({
-            name: name,
-            koreanName: koreanName,
-            preferredTime: startTime && endTime ? `${startTime} - ${endTime}` : 'All day',
-            slots: 0
-          });
-        } else {
-          // Create new student (new Notion record or first import)
-          student = await Student.create(studentData);
-          createdStudents.push({
-            name: name,
-            koreanName: koreanName,
-            preferredTime: startTime && endTime ? `${startTime} - ${endTime}` : 'All day',
-            slots: 0
-          });
-        }
-
+        notionStudents.push({
+          notionPageId: page.id,
+          name, koreanName, grade, country, startTime, endTime, schedulePattern,
+          checkboxDays, slotIds
+        });
       } catch (error) {
-        const studentName = (page.properties['Full Name']?.title?.[0]?.plain_text ||
-                           page.properties['Student']?.title?.[0]?.plain_text ||
-                           page.properties['English Name']?.rich_text?.[0]?.plain_text || 'Unknown').trim();
+        const studentName = (page.properties['Full Name']?.title?.[0]?.plain_text || 'Unknown').trim();
         errors.push(`${studentName}: ${error.message}`);
       }
     }
 
+    // Single batch lookup for all existing students by Notion page IDs
+    const notionPageIds = notionStudents.map(s => s.notionPageId);
+    const existingStudents = await Student.findByNotionPageIds(notionPageIds);
+    const existingPageIdMap = new Map(existingStudents.map(s => [s.notion_page_id, s.id]));
+
+    // Split into creates and updates
+    const toCreate = [];
+    const toUpdate = [];
+    const createdInfo = [];
+    const updatedInfo = [];
+
+    for (const s of notionStudents) {
+      const studentData = {
+        name: s.name,
+        korean_name: s.koreanName,
+        grade: s.grade,
+        country: s.country,
+        availability: s.slotIds,
+        color_keyword: 'blue',
+        date: date,
+        teacher_notes: '',
+        schedule_days: s.checkboxDays,
+        schedule_pattern: s.schedulePattern,
+        notion_page_id: s.notionPageId
+      };
+
+      const existingId = existingPageIdMap.get(s.notionPageId);
+      const displayTime = s.startTime && s.endTime ? `${s.startTime} - ${s.endTime}` : 'All day';
+
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: studentData });
+        updatedInfo.push({ name: s.name, koreanName: s.koreanName, preferredTime: displayTime, slots: s.slotIds.length });
+      } else {
+        toCreate.push(studentData);
+        createdInfo.push({ name: s.name, koreanName: s.koreanName, preferredTime: displayTime, slots: s.slotIds.length });
+      }
+    }
+
+    // Batch create and batch reactivate
+    await Promise.all([
+      toCreate.length > 0 ? Student.createBatch(toCreate) : [],
+      toUpdate.length > 0 ? Student.reactivateBatch(toUpdate) : [],
+    ]);
+
     res.json({
       success: true,
-      created: createdStudents,
-      updated: updatedStudents,
+      created: createdInfo,
+      updated: updatedInfo,
       errors: errors,
       summary: {
-        total: createdStudents.length + updatedStudents.length,
-        created: createdStudents.length,
-        updated: updatedStudents.length,
+        total: createdInfo.length + updatedInfo.length,
+        created: createdInfo.length,
+        updated: updatedInfo.length,
         failed: errors.length
       }
     });
   } catch (error) {
     console.error('Error importing students from Notion:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to import students from Notion',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -658,6 +662,196 @@ export const getAllNotionStudents = async (req, res) => {
       error: 'Failed to fetch students from Notion',
       message: error.message
     });
+  }
+};
+
+// Auto-sync students from Notion (only fetches pages edited since last sync)
+export const syncStudentsFromNotion = async (req, res) => {
+  try {
+    const notionApiKey = process.env.NOTION_API_KEY;
+    const notionDatabaseId = process.env.NOTION_STUDENTS_DATABASE_ID;
+
+    if (!notionApiKey || !notionDatabaseId) {
+      return res.status(500).json({ error: 'Notion API credentials not configured' });
+    }
+
+    // Get last sync timestamp from DB
+    let lastSyncedAt = null;
+    try {
+      const syncLog = await pool.query(
+        `SELECT last_edited_filter FROM notion_sync_log
+         WHERE sync_type = 'students' ORDER BY id DESC LIMIT 1`
+      );
+      if (syncLog.rows[0]?.last_edited_filter) {
+        lastSyncedAt = syncLog.rows[0].last_edited_filter;
+      }
+    } catch (e) {
+      // Table may not exist yet
+    }
+
+    // Build Notion query with last_edited_time filter if we have a previous sync
+    const queryBody = {
+      filter: {
+        property: 'Status',
+        select: { equals: 'Active' }
+      }
+    };
+
+    if (lastSyncedAt) {
+      queryBody.filter = {
+        and: [
+          { property: 'Status', select: { equals: 'Active' } },
+          { timestamp: 'last_edited_time', last_edited_time: { after: lastSyncedAt.toISOString() } }
+        ]
+      };
+    }
+
+    const syncStartTime = new Date();
+    const allPages = await fetchAllNotionPages(notionApiKey, notionDatabaseId, queryBody);
+
+    if (allPages.length === 0) {
+      // Log the sync even if nothing changed
+      try {
+        await pool.query(
+          `INSERT INTO notion_sync_log (sync_type, last_edited_filter, pages_processed, created, updated, skipped)
+           VALUES ('students', $1, 0, 0, 0, 0)`,
+          [syncStartTime]
+        );
+      } catch (e) { /* table may not exist */ }
+
+      return res.json({
+        success: true,
+        message: 'No changes detected since last sync',
+        summary: { total: 0, created: 0, updated: 0, skipped: 0 }
+      });
+    }
+
+    // Extract student data from changed pages
+    const errors = [];
+    const notionStudents = [];
+    for (const page of allPages) {
+      try {
+        const name = (page.properties['Full Name']?.title?.[0]?.plain_text ||
+                     page.properties['Student']?.title?.[0]?.plain_text ||
+                     page.properties['English Name']?.rich_text?.[0]?.plain_text || '').trim();
+        if (!name) continue;
+
+        const koreanName = (page.properties['Korean Name']?.rich_text?.[0]?.plain_text || '').trim();
+        const grade = page.properties['Grade']?.rich_text?.[0]?.plain_text || '';
+        const country = page.properties['Country']?.select?.name ||
+                       page.properties['Country']?.rich_text?.[0]?.plain_text ||
+                       page.properties['Nationality']?.select?.name ||
+                       page.properties['Nationality']?.rich_text?.[0]?.plain_text || '';
+        const startTime = page.properties['Start Time']?.select?.name || '';
+        const endTime = page.properties['End Time']?.select?.name || '';
+        const schedulePattern = startTime && endTime ? `${startTime} - ${endTime}` : 'Manual scheduling';
+
+        // Extract Checkbox days (multi_select)
+        const checkboxDays = (page.properties['Checkbox']?.multi_select || []).map(s => s.name);
+
+        // Compute availability slot IDs from Start Time / End Time
+        const slotIds = getSlotIds(startTime, endTime) || [];
+
+        notionStudents.push({
+          notionPageId: page.id,
+          lastEdited: page.last_edited_time,
+          name, koreanName, grade, country, startTime, endTime, schedulePattern,
+          checkboxDays, slotIds
+        });
+      } catch (error) {
+        errors.push(`${page.id}: ${error.message}`);
+      }
+    }
+
+    // Batch lookup existing students
+    const notionPageIds = notionStudents.map(s => s.notionPageId);
+    const existingStudents = await Student.findByNotionPageIds(notionPageIds);
+    const existingPageIdMap = new Map(existingStudents.map(s => [s.notion_page_id, s.id]));
+
+    // Split into creates and updates
+    const toCreate = [];
+    const toUpdate = [];
+
+    // Get a reference day — use an existing student's day or default to Monday
+    const dateResult = await pool.query(
+      `SELECT date FROM students WHERE is_active = true LIMIT 1`
+    );
+    const referenceDate = dateResult.rows[0]?.date || 'Monday';
+
+    for (const s of notionStudents) {
+      const studentData = {
+        name: s.name,
+        korean_name: s.koreanName,
+        grade: s.grade,
+        country: s.country,
+        availability: s.slotIds,
+        color_keyword: 'blue',
+        date: referenceDate,
+        teacher_notes: '',
+        schedule_days: s.checkboxDays,
+        schedule_pattern: s.schedulePattern,
+        notion_page_id: s.notionPageId
+      };
+
+      const existingId = existingPageIdMap.get(s.notionPageId);
+      if (existingId) {
+        toUpdate.push({ id: existingId, data: studentData });
+      } else {
+        toCreate.push(studentData);
+      }
+    }
+
+    // Batch create and reactivate
+    await Promise.all([
+      toCreate.length > 0 ? Student.createBatch(toCreate) : [],
+      toUpdate.length > 0 ? Student.reactivateBatch(toUpdate) : [],
+    ]);
+
+    // Update notion_last_edited timestamps
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const s of notionStudents) {
+        if (s.lastEdited) {
+          await client.query(
+            `UPDATE students SET notion_last_edited = $1 WHERE notion_page_id = $2`,
+            [s.lastEdited, s.notionPageId]
+          );
+        }
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      await client.query('ROLLBACK');
+    } finally {
+      client.release();
+    }
+
+    // Log the sync
+    try {
+      await pool.query(
+        `INSERT INTO notion_sync_log (sync_type, last_edited_filter, pages_processed, created, updated, skipped, errors)
+         VALUES ('students', $1, $2, $3, $4, $5, $6)`,
+        [syncStartTime, allPages.length, toCreate.length, toUpdate.length,
+         allPages.length - notionStudents.length, errors.length > 0 ? errors : null]
+      );
+    } catch (e) { /* table may not exist */ }
+
+    res.json({
+      success: true,
+      message: `Synced ${notionStudents.length} student(s) from Notion`,
+      summary: {
+        total: notionStudents.length,
+        created: toCreate.length,
+        updated: toUpdate.length,
+        skipped: allPages.length - notionStudents.length,
+        failed: errors.length,
+        since: lastSyncedAt ? lastSyncedAt.toISOString() : 'first sync'
+      },
+      errors: errors.length > 0 ? errors : undefined
+    });
+  } catch (error) {
+    console.error('Error syncing students from Notion:', error);
+    res.status(500).json({ error: 'Failed to sync students from Notion', details: error.message });
   }
 };
 

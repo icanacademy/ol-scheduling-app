@@ -6,6 +6,7 @@ import {
   getAssignmentsByDateRange,
   getTimeSlots
 } from '../services/api';
+import { weekDays } from '../utils/dayMapping';
 
 function TeacherPrintPage({ selectedDate, selectedDay, isAllWeekMode = false }) {
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
@@ -37,7 +38,7 @@ function TeacherPrintPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     queryKey: ['allAssignments'],
     queryFn: async () => {
       // Fetch from the template week (where assignments are stored)
-      const response = await getAssignmentsByDateRange('2024-01-01', 7);
+      const response = await getAssignmentsByDateRange(weekDays);
       return response.data || [];
     },
   });
@@ -71,13 +72,8 @@ function TeacherPrintPage({ selectedDate, selectedDay, isAllWeekMode = false }) 
     return [];
   }, [allAssignments, selectedTeacher, selectedTimeSlot, viewMode]);
 
-  // Helper function to convert date string to day name
-  const dateToDay = (dateString) => {
-    const [year, month, day] = dateString.split('T')[0].split('-').map(Number);
-    const date = new Date(year, month - 1, day);
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    return days[date.getDay()];
-  };
+  // Identity function - dates are now day names directly
+  const dateToDay = (dateString) => dateString;
 
   // Group assignments by time slot and day for weekly view
   const weeklySchedule = useMemo(() => {

@@ -1,64 +1,49 @@
 import Student from '../models/Student.js';
 import Teacher from '../models/Teacher.js';
-import { getWeekRange } from '../utils/weekUtils.js';
+import { DAY_NAMES } from '../utils/weekUtils.js';
 
 /**
- * Get all students and teachers for a given week
+ * Get all students and teachers for a given week (all 7 day names)
  */
 export const getWeeklyData = async (req, res) => {
   try {
-    const { date } = req.query;
-    if (!date) {
-      return res.status(400).json({ error: 'date is required' });
-    }
-
-    const { dates } = getWeekRange(date);
-    
-    // Get students and teachers for all dates in the week
+    // The "week" is simply all 7 day names
     const weeklyData = {};
-    
-    for (const currentDate of dates) {
-      const students = await Student.getAll(currentDate);
-      const teachers = await Teacher.getAll(currentDate);
-      
-      weeklyData[currentDate] = {
+
+    for (const day of DAY_NAMES) {
+      const students = await Student.getAll(day);
+      const teachers = await Teacher.getAll(day);
+
+      weeklyData[day] = {
         students,
         teachers,
-        date: currentDate
+        date: day
       };
     }
 
     res.json({
       success: true,
-      weekRange: getWeekRange(date),
+      weekRange: { startDate: 'Monday', endDate: 'Sunday', dates: DAY_NAMES },
       data: weeklyData
     });
   } catch (error) {
     console.error('Error fetching weekly data:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch weekly data',
-      details: error.message 
+      details: error.message
     });
   }
 };
 
 /**
- * Copy students/teachers from one day to another within the same week
+ * Copy students/teachers from one day to another
  */
 export const copyDaySchedule = async (req, res) => {
   try {
     const { fromDate, toDate, copyStudents = true, copyTeachers = true } = req.body;
-    
-    if (!fromDate || !toDate) {
-      return res.status(400).json({ error: 'fromDate and toDate are required' });
-    }
 
-    // Verify both dates are in the same week
-    const fromWeek = getWeekRange(fromDate);
-    const toWeek = getWeekRange(toDate);
-    
-    if (fromWeek.startDate !== toWeek.startDate) {
-      return res.status(400).json({ error: 'Dates must be in the same week' });
+    if (!fromDate || !toDate) {
+      return res.status(400).json({ error: 'fromDate and toDate are required (day names like "Monday")' });
     }
 
     const results = {
@@ -69,11 +54,11 @@ export const copyDaySchedule = async (req, res) => {
     // Copy students
     if (copyStudents) {
       const sourceStudents = await Student.getAll(fromDate);
-      
+
       for (const student of sourceStudents) {
         try {
           const existingStudent = await Student.findByName(student.name, toDate);
-          
+
           const studentData = {
             name: student.name,
             english_name: student.english_name,
@@ -85,13 +70,13 @@ export const copyDaySchedule = async (req, res) => {
             schedule_pattern: student.schedule_pattern,
             date: toDate
           };
-          
+
           if (existingStudent) {
             await Student.reactivate(existingStudent.id, studentData);
           } else {
             await Student.create(studentData);
           }
-          
+
           results.students.copied++;
         } catch (error) {
           results.students.errors.push(`${student.name}: ${error.message}`);
@@ -102,24 +87,24 @@ export const copyDaySchedule = async (req, res) => {
     // Copy teachers
     if (copyTeachers) {
       const sourceTeachers = await Teacher.getAll(fromDate);
-      
+
       for (const teacher of sourceTeachers) {
         try {
           const existingTeacher = await Teacher.findByName(teacher.name, toDate);
-          
+
           const teacherData = {
             name: teacher.name,
             availability: teacher.availability,
             color_keyword: teacher.color_keyword,
             date: toDate
           };
-          
+
           if (existingTeacher) {
             await Teacher.reactivate(existingTeacher.id, teacherData);
           } else {
             await Teacher.create(teacherData);
           }
-          
+
           results.teachers.copied++;
         } catch (error) {
           results.teachers.errors.push(`${teacher.name}: ${error.message}`);
@@ -134,9 +119,9 @@ export const copyDaySchedule = async (req, res) => {
     });
   } catch (error) {
     console.error('Error copying day schedule:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to copy day schedule',
-      details: error.message 
+      details: error.message
     });
   }
 };
@@ -146,52 +131,41 @@ export const copyDaySchedule = async (req, res) => {
  */
 export const getStudentsForWeeklyView = async (req, res) => {
   try {
-    const { date } = req.query;
-    if (!date) {
-      return res.status(400).json({ error: 'date is required' });
-    }
-
-    const { dates } = getWeekRange(date);
-    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-    
     const weeklyStudents = {};
-    
+
     // Initialize each day
-    dates.forEach((currentDate, index) => {
-      weeklyStudents[currentDate] = {
-        date: currentDate,
-        dayName: dayNames[index],
+    for (const day of DAY_NAMES) {
+      weeklyStudents[day] = {
+        date: day,
+        dayName: day,
         students: []
       };
-    });
+    }
 
-    // Get all students for the week and filter by schedule days
-    for (let i = 0; i < dates.length; i++) {
-      const currentDate = dates[i];
-      const dayName = dayNames[i];
-      
-      const allStudents = await Student.getAll(currentDate);
-      
+    // Get all students for each day and filter by schedule days
+    for (const day of DAY_NAMES) {
+      const allStudents = await Student.getAll(day);
+
       // Filter students who should be scheduled for this day
       const dayStudents = allStudents.filter(student => {
         const scheduleDays = student.schedule_days || [];
         // If no schedule days set, they can be manually scheduled any day
-        return scheduleDays.length === 0 || scheduleDays.includes(dayName);
+        return scheduleDays.length === 0 || scheduleDays.includes(day);
       });
-      
-      weeklyStudents[currentDate].students = dayStudents;
+
+      weeklyStudents[day].students = dayStudents;
     }
 
     res.json({
       success: true,
-      weekRange: getWeekRange(date),
+      weekRange: { startDate: 'Monday', endDate: 'Sunday', dates: DAY_NAMES },
       data: weeklyStudents
     });
   } catch (error) {
     console.error('Error fetching students for weekly view:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: 'Failed to fetch weekly student data',
-      details: error.message 
+      details: error.message
     });
   }
 };

@@ -34,7 +34,7 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     queryKey: ['weekAssignments', mondayDate],
     queryFn: async () => {
       if (!mondayDate) return [];
-      const response = await getAssignmentsByDateRange(mondayDate, 7);
+      const response = await getAssignmentsByDateRange(weekDays);
       return response.data;
     },
     enabled: !!mondayDate,
@@ -51,11 +51,8 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     }
 
     for (const assignment of weekAssignmentsData) {
-      // Parse the date and get the day name
-      const assignmentDate = new Date(assignment.date);
-      const dayIndex = assignmentDate.getUTCDay();
-      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      const dayName = dayNames[dayIndex];
+      // assignment.date is now a day name directly (e.g., "Monday")
+      const dayName = assignment.date;
 
       if (byDay[dayName]) {
         byDay[dayName].push(assignment);
@@ -379,12 +376,8 @@ function StudentsPage({ selectedDate, isAllWeekMode = false }) {
     });
   }, [students, searchTerm, dayFilter, assignments, weekAssignments]); // Added assignments and weekAssignments dependencies
 
-  // Get current day name
-  const getCurrentDayName = () => {
-    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    const date = new Date(selectedDate);
-    return days[date.getDay()];
-  };
+  // Get current day name - selectedDate is now a day name directly
+  const getCurrentDayName = () => selectedDate;
 
   if (studentsLoading) {
     return <div className="text-center py-8">Loading students...</div>;
