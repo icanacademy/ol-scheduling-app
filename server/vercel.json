@@ -17,5 +17,15 @@
       "src": "/(.*)",
       "dest": "src/server.js"
     }
+  ],
+  "crons": [
+    {
+      "path": "/api/notion/sync-students",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/schedule-cache/refresh",
+      "schedule": "5 6 * * *"
+    }
   ]
 }
