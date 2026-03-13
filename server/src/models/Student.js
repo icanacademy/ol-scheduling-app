@@ -276,7 +276,9 @@ class Student {
   static async findByNotionPageIds(notionPageIds) {
     if (!notionPageIds || notionPageIds.length === 0) return [];
     const result = await pool.query(
-      'SELECT id, notion_page_id FROM students WHERE notion_page_id = ANY($1)',
+      `SELECT id, notion_page_id, name, korean_name, grade, country,
+              updated_at, notion_last_edited
+       FROM students WHERE notion_page_id = ANY($1)`,
       [notionPageIds]
     );
     return result.rows;

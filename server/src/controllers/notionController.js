@@ -3,6 +3,7 @@ import pool from '../db/connection.js';
 import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
 import TimeSlot from '../models/TimeSlot.js';
+import { notifyCronFailure, notifyCronSuccess } from '../utils/notify.js';
 
 // Helper function to fetch all pages from Notion with pagination
 async function fetchAllNotionPages(notionApiKey, notionDatabaseId, queryBody = {}) {
@@ -780,10 +781,11 @@ export const syncStudentsFromNotion = async (req, res) => {
       }
     }
 
-    // Batch lookup existing students
+    // Batch lookup existing students (includes name, grade, etc. for conflict detection)
     const notionPageIds = notionStudents.map(s => s.notionPageId);
     const existingStudents = await Student.findByNotionPageIds(notionPageIds);
     const existingPageIdMap = new Map(existingStudents.map(s => [s.notion_page_id, s.id]));
+    const existingDetailMap = new Map(existingStudents.map(s => [s.notion_page_id, s]));
 
     // Fallback: find students by name+korean_name for those not matched by notion_page_id
     const unmatchedByNotion = notionStudents.filter(s => !existingPageIdMap.has(s.notionPageId));
@@ -797,9 +799,10 @@ export const syncStudentsFromNotion = async (req, res) => {
       }
     }
 
-    // Split into creates and updates
+    // Split into creates and updates, detect conflicts
     const toCreate = [];
     const toUpdate = [];
+    const conflicts = [];
 
     // Get a reference day — use an existing student's day or default to Monday
     const dateResult = await pool.query(
@@ -829,6 +832,21 @@ export const syncStudentsFromNotion = async (req, res) => {
         existingId = nameMap.get(nameKey);
       }
       if (existingId) {
+        // Conflict detection: check if local data was modified after last Notion sync
+        const existing = existingDetailMap.get(s.notionPageId);
+        if (existing && existing.updated_at && existing.notion_last_edited) {
+          const localModified = new Date(existing.updated_at);
+          const lastSync = new Date(existing.notion_last_edited);
+          if (localModified > lastSync) {
+            const diffs = [];
+            if (existing.name !== s.name) diffs.push(`name: "${existing.name}" → "${s.name}"`);
+            if (existing.korean_name !== s.koreanName) diffs.push(`korean_name: "${existing.korean_name}" → "${s.koreanName}"`);
+            if (existing.grade !== s.grade) diffs.push(`grade: "${existing.grade}" → "${s.grade}"`);
+            if (diffs.length > 0) {
+              conflicts.push({ studentId: existingId, name: existing.name, changes: diffs });
+            }
+          }
+        }
         toUpdate.push({ id: existingId, data: studentData });
       } else {
         toCreate.push(studentData);
@@ -870,21 +888,30 @@ export const syncStudentsFromNotion = async (req, res) => {
       );
     } catch (e) { /* table may not exist */ }
 
+    const summary = {
+      total: notionStudents.length,
+      created: toCreate.length,
+      updated: toUpdate.length,
+      skipped: allPages.length - notionStudents.length,
+      failed: errors.length,
+      conflicts: conflicts.length,
+      since: lastSyncedAt ? lastSyncedAt.toISOString() : 'first sync'
+    };
+
+    const notifyMsg = `Synced ${summary.total} students (${summary.created} new, ${summary.updated} updated, ${summary.failed} failed` +
+      (conflicts.length > 0 ? `, ${conflicts.length} conflicts)` : ')');
+    await notifyCronSuccess('notion/sync-students', notifyMsg);
+
     res.json({
       success: true,
       message: `Synced ${notionStudents.length} student(s) from Notion`,
-      summary: {
-        total: notionStudents.length,
-        created: toCreate.length,
-        updated: toUpdate.length,
-        skipped: allPages.length - notionStudents.length,
-        failed: errors.length,
-        since: lastSyncedAt ? lastSyncedAt.toISOString() : 'first sync'
-      },
+      summary,
+      conflicts: conflicts.length > 0 ? conflicts : undefined,
       errors: errors.length > 0 ? errors : undefined
     });
   } catch (error) {
     console.error('Error syncing students from Notion:', error);
+    await notifyCronFailure('notion/sync-students', error);
     res.status(500).json({ error: 'Failed to sync students from Notion', details: error.message });
   }
 };

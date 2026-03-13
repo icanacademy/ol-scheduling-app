@@ -1,10 +1,13 @@
 import ScheduleCache from '../models/ScheduleCache.js';
+import { notifyCronFailure, notifyCronSuccess } from '../utils/notify.js';
 
 export const refreshCache = async (req, res) => {
   try {
     const result = await ScheduleCache.refresh();
+    await notifyCronSuccess('schedule-cache/refresh', `Cached ${result.cached} rows for ${result.students} students`);
     res.json(result);
   } catch (error) {
+    await notifyCronFailure('schedule-cache/refresh', error);
     res.status(500).json({ error: 'Failed to refresh schedule cache', message: error.message });
   }
 };
