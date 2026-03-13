@@ -282,6 +282,17 @@ class Student {
     return result.rows;
   }
 
+  // Find existing students by name+korean_name (fallback when notion_page_id lookup misses)
+  static async findByNames(nameKeys) {
+    if (!nameKeys || nameKeys.length === 0) return [];
+    const names = nameKeys.map(k => k.name);
+    const result = await pool.query(
+      `SELECT id, name, korean_name FROM students WHERE LOWER(name) = ANY($1)`,
+      [names.map(n => n.toLowerCase())]
+    );
+    return result.rows;
+  }
+
   // Batch create multiple students in a single query
   static async createBatch(studentsData) {
     if (!studentsData || studentsData.length === 0) return [];
@@ -337,7 +348,18 @@ class Student {
     }
 
     const result = await pool.query(
-      `INSERT INTO students (${columns.join(', ')}) VALUES ${valuePlaceholders} RETURNING *`,
+      `INSERT INTO students (${columns.join(', ')}) VALUES ${valuePlaceholders}
+       ON CONFLICT (notion_page_id) DO UPDATE SET
+         name = EXCLUDED.name,
+         korean_name = EXCLUDED.korean_name,
+         grade = EXCLUDED.grade,
+         country = EXCLUDED.country,
+         availability = EXCLUDED.availability,
+         schedule_days = EXCLUDED.schedule_days,
+         schedule_pattern = EXCLUDED.schedule_pattern,
+         is_active = true,
+         updated_at = NOW()
+       RETURNING *`,
       params
     );
     return result.rows;

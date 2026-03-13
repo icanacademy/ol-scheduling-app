@@ -497,6 +497,18 @@ export const importStudentsFromNotion = async (req, res) => {
     const existingStudents = await Student.findByNotionPageIds(notionPageIds);
     const existingPageIdMap = new Map(existingStudents.map(s => [s.notion_page_id, s.id]));
 
+    // Fallback: find students by name+korean_name for those not matched by notion_page_id
+    const unmatchedByNotion = notionStudents.filter(s => !existingPageIdMap.has(s.notionPageId));
+    let nameMap = new Map();
+    if (unmatchedByNotion.length > 0) {
+      const nameKeys = unmatchedByNotion.map(s => ({ name: s.name, koreanName: s.koreanName }));
+      const existingByName = await Student.findByNames(nameKeys);
+      for (const row of existingByName) {
+        const key = `${row.name.toLowerCase()}::${row.korean_name || ''}`;
+        if (!nameMap.has(key)) nameMap.set(key, row.id);
+      }
+    }
+
     // Split into creates and updates
     const toCreate = [];
     const toUpdate = [];
@@ -518,7 +530,12 @@ export const importStudentsFromNotion = async (req, res) => {
         notion_page_id: s.notionPageId
       };
 
-      const existingId = existingPageIdMap.get(s.notionPageId);
+      // Try notion_page_id first, then fallback to name+korean_name
+      let existingId = existingPageIdMap.get(s.notionPageId);
+      if (!existingId) {
+        const nameKey = `${s.name.toLowerCase()}::${s.koreanName || ''}`;
+        existingId = nameMap.get(nameKey);
+      }
       const displayTime = s.startTime && s.endTime ? `${s.startTime} - ${s.endTime}` : 'All day';
 
       if (existingId) {
@@ -768,6 +785,18 @@ export const syncStudentsFromNotion = async (req, res) => {
     const existingStudents = await Student.findByNotionPageIds(notionPageIds);
     const existingPageIdMap = new Map(existingStudents.map(s => [s.notion_page_id, s.id]));
 
+    // Fallback: find students by name+korean_name for those not matched by notion_page_id
+    const unmatchedByNotion = notionStudents.filter(s => !existingPageIdMap.has(s.notionPageId));
+    let nameMap = new Map();
+    if (unmatchedByNotion.length > 0) {
+      const nameKeys = unmatchedByNotion.map(s => ({ name: s.name, koreanName: s.koreanName }));
+      const existingByName = await Student.findByNames(nameKeys);
+      for (const row of existingByName) {
+        const key = `${row.name.toLowerCase()}::${row.korean_name || ''}`;
+        if (!nameMap.has(key)) nameMap.set(key, row.id);
+      }
+    }
+
     // Split into creates and updates
     const toCreate = [];
     const toUpdate = [];
@@ -793,7 +822,12 @@ export const syncStudentsFromNotion = async (req, res) => {
         notion_page_id: s.notionPageId
       };
 
-      const existingId = existingPageIdMap.get(s.notionPageId);
+      // Try notion_page_id first, then fallback to name+korean_name
+      let existingId = existingPageIdMap.get(s.notionPageId);
+      if (!existingId) {
+        const nameKey = `${s.name.toLowerCase()}::${s.koreanName || ''}`;
+        existingId = nameMap.get(nameKey);
+      }
       if (existingId) {
         toUpdate.push({ id: existingId, data: studentData });
       } else {
